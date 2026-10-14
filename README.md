@@ -1,94 +1,128 @@
 # Frown Watch
 
-表情の癖（眉間に力が入る、など）に気づかせるデスクトップ Web の試作。
-Chrome の Document Picture-in-Picture で常に最前面の小窓に内カメラと判定結果を出し、
-MediaPipe Face Landmarker の blendshape で表情を判定する。動画は一切外部公開されない。
+動画を見ている間、内カメラで表情の癖を見守り、眉間に力が入ったままになると小窓が赤くなって知らせる Web アプリです。
+判定はすべてブラウザの中で行い、**動画は一切外部公開されません**。
 
-- 公開 URL: https://taiki-jp.github.io/frown-watch/
-- リポジトリ: https://github.com/Taiki-jp/frown-watch
+**▶ 使ってみる: https://taiki-jp.github.io/frown-watch/**
 
-## 動かし方
+日本語と英語に対応しています。 ／ Available in Japanese and English. [English summary below](#english).
 
-```sh
-cd ~/git/frown-watch
-python3 -m http.server 8765 --bind 127.0.0.1
-```
+![トップページ](docs/top.png)
 
-Chrome で http://localhost:8765/ を開くとトップページ、http://localhost:8765/app.html がアプリ本体。Chrome 116 以降が必要。
+## できること
+
+- **その場で知らせる** — 眉間、額、目元、口角、口の開き。力みが 2 秒以上続くと、常に最前面の小窓の枠が赤く点滅します。音や通知を足すこともでき、鳴りすぎないよう間隔をあけます
+- **癖の推移が見える** — 今日の回数、1 時間あたりの回数、14 日の推移。記録が溜まると先週との比較が一文で出ます
+- **動画は一切外部公開されません** — ライブラリとモデルはページと一緒に配布され、外部のサーバーには何も送りません。確認方法も公開しています
 
 ## 使い方
 
-初回はセットアップが 5 段階で進む。
+1. Chrome で https://taiki-jp.github.io/frown-watch/ を開き、「はじめる」を押します
+2. 初回はセットアップが 5 段階で進みます
+   1. はじめに — 動作環境の確認
+   2. カメラ — 内カメラを許可して映りを確認
+   3. 基準 — 無表情で 3 秒待ち、その顔を「0」にする
+   4. 通知方法 — 音と通知を選ぶ
+   5. 小窓 — 常に最前面の小窓に切り替える
+3. 小窓を出したまま、いつもどおり動画を見ます。眉間に力が入ったままになると小窓が赤くなります
+4. 2 回目からはふだんの画面が開きます。「見守りを開始」→「小窓にする」で同じ状態になります
 
-1. はじめに: 何をするかの説明と、動作環境の確認
-2. カメラ: 内カメラを許可して映りを確認する
-3. 基準: 無表情で 3 秒待ち、その顔を「0」にする
-4. 通知方法: 音と通知を選び、試しに鳴らす
-5. 小窓: 常に最前面の小窓に切り替えて、別タブや別アプリで動画を見る
+![セットアップ。動作環境の確認](docs/app.png)
 
-2 回目からはふだんの画面が開く。「見守りを開始」から「小窓にする」で同じ状態になる。
-上部に今日の回数、1 時間あたりの回数、見守った分数が出て、先週との比較と 14 日の推移が並ぶ。
-しきい値などの細かい調整は「設定」の中の「詳細設定」、生の値は「詳細（開発者向け）」にある。
+## 動作環境
 
-アプリ本体の開発用 URL パラメータ: `app.html?autostart` でセットアップを飛ばして開始、`?ob=3` でセットアップの 3 番目を開く、`?open` で折りたたみを全部開く、`?env` で動作環境チェックを実行。
+- Chrome 116 以降（Edge などの Chromium 系でも動きます）。小窓表示は Safari と Firefox では使えません
+- 内蔵カメラのある PC、または外付けカメラ
+- インストール不要。アプリの中の「動作環境を確認する」で、足りないものを確認できます
 
-## 言語
+## プライバシー
 
-日本語と英語に対応。ヘッダーのスイッチで切り替えられ、選んだ言語はブラウザに保存される。初回はブラウザの言語設定で決まる。
-URL に `?lang=en` または `?lang=ja` を付けると、その言語で開いて保存する。
-文言は `i18n.js` の辞書にまとめてあり、静的な文は HTML の `data-i18n` 属性、動的な文は `t()` で引く。
+- 内カメラの動画はこの PC の中だけで処理し、一切外部公開されません
+- 保存するのは、癖が出た回数と秒数、見守った時間、無表情の基準値だけです。ブラウザの localStorage にだけ残ります
+- 判定に使うライブラリとモデルはページと一緒に配布しています。外部のサーバーからは何も読み込みません
 
-## 判定の調整
+### 動画が外部公開されないことの確認方法
 
-- しきい値: 基準からの増分がこの値を超えたら「力が入っている」とみなす。「今の値」を見ながら決める
-- 継続: この秒数続いたら 1 回と数え、枠を赤くする
-- 休止: 音と通知はこの秒数の間隔をあける。枠の点滅は休止に関係なく続く
-- 診断パネル: 判定に使える生の値（blendshape、landmark の距離比、眉間の皮膚の画素）を並べて見られる
+1. 開発者ツールの Network タブを開いたまま見守りを開始する。最初の読み込み以外に通信が起きません
+2. 見守りを開始したあとに Wi-Fi を切っても、そのまま動き続けます
+3. ページの CSP（Content-Security-Policy）で、配布元以外への通信をブラウザ自身が禁止しています。`app.html` と `index.html` の冒頭にある meta タグで確認できます
+4. ビルド工程がなく、このリポジトリのファイルがそのまま配信されています。配布物とリポジトリを突き合わせられます
 
-## 動画が外部公開されないことの確認方法
+## 設定
 
-このページにはバックエンドがなく、映像も判定結果もどこにも送らない。それを第三者が確かめる手段を 4 つ用意している。
+- **見守る癖** — 5 つの癖を個別にオン・オフできます
+- **敏感さ** — 敏感・標準・鈍感の 3 段階。鳴りすぎると感じたら「鈍感」に
+- **通知方法** — 音、通知、その間隔
+- **無表情の基準** — いつでも取り直せます
+- **データ** — CSV で持ち出せます。今日の分だけ消すこともできます
+- **詳細設定** — しきい値、継続秒数、休止秒数を癖ごとに調整できます
 
-1. 開発者ツールの Network タブを開いたままカメラを開始する。最初の読み込み以外に通信が起きない
-2. カメラを開始したあとに Wi-Fi を切っても、そのまま動き続ける
-3. `index.html` 冒頭の CSP（Content-Security-Policy）で、配布元以外への通信をブラウザ自身が禁止している。コードが改変されても、ブラウザが外部への送信を拒否する
-4. ビルド工程がなく、配布しているファイルがそのまま動く。公開リポジトリと配布物を突き合わせれば、動いているコードが読んだコードと同じだと確認できる
+## 仕組み
 
-判定ライブラリとモデルは `vendor/` に同梱しており、外部の CDN からは何も読み込まない。
-同梱物の取得元と SHA-256 は `vendor/NOTICE.md` にある。
+1. [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) が顔の 478 点と 52 種類の表情係数（blendshape）を端末内で推定します
+2. 無表情の基準からの増分がしきい値を超えた状態が、継続秒数だけ続いたら 1 回と数えます
+3. 小窓は Chrome の Document Picture-in-Picture で、ほかのアプリの上にも残ります
 
-## ファイル構成
+## 開発者向け
 
-- `index.html`: トップページ。アプリの概要と、CSS アニメーションによるデモ。「はじめる」でアプリ本体へ
-- `top.js`: トップページのスクリプト。言語の切り替えと、セットアップ済みならボタンの文言を変える
-- `i18n.js`: 日本語と英語の辞書と切り替えの仕組み
-- `app.html`: アプリ本体の画面と CSP
-- `app.js`: 判定と表示のすべて
-- `vendor/mediapipe/`: MediaPipe Tasks Vision 1.1.0（Apache-2.0）
-- `vendor/models/face_landmarker.task`: 顔 landmark と blendshape のモデル（Apache-2.0）
-- `test/`: 判定ロジックと診断値の単体テスト
-
-## 記録の保存先
-
-ブラウザの localStorage のみ。`fw.settings`（設定）、`fw.baseline`（無表情の基準）、`fw.stats`（日次の記録）。
-
-## 公開のしかた（GitHub Pages）
-
-静的ファイルだけなので、リポジトリをそのまま配信すればよい。
+### ローカルで動かす
 
 ```sh
-cd ~/git/frown-watch
-git init && git add -A && git commit -m "Frown Watch prototype"
-gh repo create frown-watch --public --source=. --push
+git clone https://github.com/Taiki-jp/frown-watch.git
+cd frown-watch
+python3 -m http.server 8765 --bind 127.0.0.1
 ```
 
-その後 GitHub のリポジトリ設定の Pages で、Deploy from a branch を選び、`main` の `/ (root)` を指定する。
-数分で `https://<ユーザー名>.github.io/frown-watch/` で開けるようになる。
-GitHub Pages は https なので、カメラと小窓の API がそのまま使える。
+Chrome で http://localhost:8765/ を開きます。カメラは https か localhost でしか使えません。
 
-## テスト
+### ファイル構成
+
+| ファイル | 役割 |
+|---|---|
+| `index.html`, `top.js` | トップページと CSS アニメーションのデモ |
+| `app.html`, `app.js` | アプリ本体。判定と表示のすべて |
+| `i18n.js` | 日本語と英語の辞書と切り替え |
+| `vendor/mediapipe/` | MediaPipe Tasks Vision 1.1.0（Apache-2.0） |
+| `vendor/models/face_landmarker.task` | 顔 landmark と blendshape のモデル（Apache-2.0） |
+| `vendor/NOTICE.md` | 同梱物の取得元と SHA-256 |
+| `test/` | 判定ロジックと診断値の単体テスト |
+
+### テスト
 
 ```sh
 node test/logic.test.mjs
 node test/diag.test.mjs
 ```
+
+### 開発用の URL パラメータ
+
+`app.html` に付けて使います。
+
+| パラメータ | 動き |
+|---|---|
+| `?autostart` | セットアップを飛ばして見守りを開始 |
+| `?ob=3` | セットアップの 3 番目を開く |
+| `?open` | 折りたたみを全部開く |
+| `?env` | 動作環境チェックを実行 |
+| `?lang=en` | 言語を指定して開く（`index.html` でも可） |
+
+### 判定に使える生の値
+
+アプリの「開発者向けの診断」に、blendshape、landmark の距離比、眉間の皮膚の画素から出した値が並びます。判定方式を検討するための表です。
+
+## ライセンス
+
+MIT License。同梱している MediaPipe とモデルは Apache-2.0 です。詳細は `vendor/NOTICE.md` を見てください。
+
+---
+
+## English
+
+**Frown Watch** is a web app that watches your facial habits through the front camera while you watch videos. When your brow stays tense, an always-on-top mini window turns red to let you know. Everything runs inside the browser; **your video is never shared**.
+
+- **Try it:** https://taiki-jp.github.io/frown-watch/?lang=en
+- **Requirements:** Chrome 116 or later and a camera. The mini window is not available in Safari or Firefox
+- **Privacy:** video is processed only on your computer. Only counts, seconds, watch time and your neutral baseline are stored, in `localStorage`. The detection library and model ship with the page, and a Content-Security-Policy blocks any connection except to the page's own origin
+- **How it works:** [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) estimates 478 landmarks and 52 blendshapes on device; a habit counts when the change from your neutral baseline stays above a threshold for a few seconds; the mini window uses Chrome's Document Picture-in-Picture
+- **Run locally:** `python3 -m http.server 8765 --bind 127.0.0.1`, then open http://localhost:8765/
+- **License:** MIT. Bundled MediaPipe and model are Apache-2.0 (see `vendor/NOTICE.md`)
