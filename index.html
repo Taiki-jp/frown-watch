@@ -3,155 +3,175 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<meta name="description" content="動画を見ている間、内カメラで表情を見守り、眉間に力が入ったままになると小窓が赤くなって知らせる Web アプリ。動画は一切外部公開されません。">
 <title>Frown Watch</title>
 <style>
 :root{
-  color-scheme:dark;
-  --bg:#0e1116; --panel:#171b23; --panel2:#1f2430; --fg:#e9ecf2; --muted:#98a2b3;
-  --accent:#4ea8ff; --ok:#3ddc84; --warn:#ffb020; --alert:#ff4d4f; --border:#2a3140;
+  color-scheme:light;
+  --bg:#f7f4f1; --card:#ffffff; --fg:#28262e; --muted:#7b7784; --line:#ece6e1; --soft:#f3eeea;
+  --accent:#e26b6b; --accent-dark:#c75656; --accent-soft:#fbe9e7;
+  --ok:#2f9e7a; --ok-soft:#e3f4ec; --alert:#e5484d;
+  --radius:16px; --shadow:0 1px 2px rgba(40,20,10,.04),0 8px 24px rgba(40,20,10,.06);
 }
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
-header{display:flex;align-items:baseline;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border)}
-header h1{font-size:18px;margin:0}
-header .sub{color:var(--muted);font-size:12px}
-main{display:grid;grid-template-columns:minmax(320px,520px) 1fr;gap:20px;padding:20px;max-width:1200px}
-@media (max-width:900px){main{grid-template-columns:1fr}}
-.col{display:flex;flex-direction:column;gap:20px;min-width:0}
-section.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
-h2{font-size:13px;margin:0 0 10px;color:var(--muted);font-weight:600;letter-spacing:.02em}
-button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
-button.primary{background:var(--accent);border-color:var(--accent);color:#06131f;font-weight:600}
-button:disabled{opacity:.45;cursor:default}
-.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
-.status{color:var(--fg);font-size:13px;min-height:1.6em}
-label.chk{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:6px 6px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
-th{color:var(--muted);font-weight:600;font-size:12px}
-td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
-input[type=range]{width:100px;vertical-align:middle}
-input[type=number]{width:62px;background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font:inherit}
-select{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font:inherit}
-.live{display:inline-block;min-width:3.5em;text-align:right;font-variant-numeric:tabular-nums}
-.hint{color:var(--muted);font-size:12px;margin:6px 0 0}
-small.k{color:var(--muted)}
-a{color:var(--accent)}
-code{font-size:12px;color:var(--muted)}
-.dbar{height:6px;width:120px;background:var(--panel2);border-radius:3px}
-.dbar div{height:100%;background:var(--accent);border-radius:3px}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent-dark)}
+.wrap{max-width:960px;margin:0 auto;padding:0 20px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 0}
+.brand{font-weight:700;font-size:18px;display:flex;align-items:center;gap:8px;color:var(--fg);text-decoration:none}
+.logo{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#f0a57a)}
+.nav{display:flex;gap:18px;align-items:center;font-size:14px}
+.nav a{color:var(--muted);text-decoration:none}
+.nav a:hover{color:var(--accent-dark)}
+.btn{display:inline-block;font:inherit;font-weight:700;border-radius:12px;padding:12px 22px;border:1px solid var(--line);background:#fff;color:var(--fg);text-decoration:none;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-dark)}
+.btn.small{padding:8px 14px;font-size:14px}
 
-/* ---- stage: この要素ごと小窓（Document PiP）へ移動する ---- */
-.stage{position:relative;width:100%;aspect-ratio:4/3;background:#000;border:4px solid var(--border);border-radius:12px;overflow:hidden;transition:border-color .2s}
-.stage.alert{border-color:var(--alert);animation:pulse 1s ease-in-out infinite}
-@keyframes pulse{0%,100%{box-shadow:inset 0 0 0 0 rgba(255,77,79,0)}50%{box-shadow:inset 0 0 0 6px rgba(255,77,79,.5)}}
-.stage video,.stage canvas.overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
-.stage canvas.inset{position:absolute;top:8px;right:8px;width:42%;aspect-ratio:4/3;border:2px solid rgba(255,255,255,.75);border-radius:8px;background:#000;display:none}
-.stage.has-inset canvas.inset{display:block}
-.stage .inset-label{position:absolute;top:10px;right:8px;width:42%;text-align:center;font-size:11px;color:#fff;text-shadow:0 1px 2px #000;pointer-events:none;display:none}
-.stage.has-inset .inset-label{display:block}
-.hud{position:absolute;left:0;right:0;bottom:0;padding:8px 10px;background:linear-gradient(transparent,rgba(0,0,0,.75));pointer-events:none}
-.alert-label{font-weight:700;font-size:16px;color:#fff;text-shadow:0 1px 3px #000;min-height:1.4em}
-.stage.alert .alert-label{color:#ffd6d6}
-.meters{display:flex;flex-direction:column;gap:3px;margin-top:4px}
-.meter{display:flex;align-items:center;gap:6px;font-size:11px;color:#fff;text-shadow:0 1px 2px #000}
-.meter .m-label{width:4em;flex:none}
-.meter .m-bar{position:relative;flex:1;height:6px;background:rgba(255,255,255,.2);border-radius:3px}
-.meter .m-fill{height:100%;width:0;background:var(--ok);border-radius:3px;transition:width .1s linear}
-.meter.over .m-fill{background:var(--alert)}
-.meter .m-th{position:absolute;top:-2px;width:2px;height:10px;background:#fff}
-.hud-footer{display:flex;justify-content:space-between;font-size:11px;color:#ddd;text-shadow:0 1px 2px #000;margin-top:4px}
-body.pip{background:#000;overflow:hidden}
-body.pip .stage{width:100vw;height:100vh;border-radius:0}
+/* ---- ヒーロー ---- */
+.hero{display:grid;grid-template-columns:1.05fr 1fr;gap:40px;align-items:center;padding:36px 0 48px}
+.hero h1{font-size:34px;line-height:1.35;margin:0 0 14px;letter-spacing:.01em;word-break:keep-all}
+.hero p.lead{font-size:16px;color:#4b4854;margin:0 0 22px}
+.hero .cta{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.hero .note{color:var(--muted);font-size:13px;margin:12px 0 0}
+.tag{display:inline-block;font-size:12px;font-weight:700;color:var(--accent-dark);background:var(--accent-soft);border-radius:999px;padding:3px 10px;margin-bottom:14px}
+
+/* ---- デモ ---- */
+.demo{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+.screen{position:relative;aspect-ratio:16/10;background:#15181f;border-radius:12px;overflow:hidden}
+.video{position:absolute;inset:14px 14px 42px;border-radius:8px;background:#0b0d12;overflow:hidden}
+.video::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#1b2230,#0f1218 60%,#171d2a)}
+.vt{position:absolute;left:10%;top:10%;width:46%;height:8px;border-radius:4px;background:rgba(255,255,255,.18)}
+.vt.short{top:10%;left:10%;transform:translateY(14px);width:28%;background:rgba(255,255,255,.1)}
+.vplay{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.12)}
+.vbar{height:100%;width:12%;background:var(--accent);animation:play 8s linear infinite}
+.pip{position:absolute;right:14px;bottom:14px;width:40%;aspect-ratio:4/3;background:#000;border:3px solid #2a2f3a;border-radius:10px;overflow:hidden;animation:pipBorder 8s linear infinite}
+.pip svg{position:absolute;inset:0;width:100%;height:100%}
+.brow{transform-box:fill-box}
+.brow-l{transform-origin:0% 50%;animation:browL 8s ease-in-out infinite}
+.brow-r{transform-origin:100% 50%;animation:browR 8s ease-in-out infinite}
+.lines{opacity:0;animation:lines 8s ease-in-out infinite}
+.pip-hud{position:absolute;left:0;right:0;bottom:0;padding:5px 7px;display:flex;align-items:center;gap:6px;font-size:9px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.7))}
+.pip-hud .m{flex:1;height:4px;background:rgba(255,255,255,.2);border-radius:2px;position:relative}
+.pip-hud .mf{height:100%;width:8%;background:#3ddc84;border-radius:2px;animation:meter 8s ease-in-out infinite,meterColor 8s linear infinite}
+.pip-hud .th{position:absolute;left:45%;top:-2px;width:1px;height:8px;background:#fff}
+.toast{position:absolute;left:14px;bottom:14px;display:inline-flex;align-items:center;gap:8px;background:#fff;color:var(--fg);font-size:12px;font-weight:700;padding:8px 12px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;animation:toast 8s ease-in-out infinite}
+.toast .dot{width:8px;height:8px;border-radius:50%;background:var(--alert)}
+.caption{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:12px;margin:12px 2px 0}
+@keyframes play{0%{width:12%}100%{width:88%}}
+@keyframes browL{0%,25%{transform:translate(0,0) rotate(0)}38%,62%{transform:translate(3px,4px) rotate(14deg)}75%,100%{transform:translate(0,0) rotate(0)}}
+@keyframes browR{0%,25%{transform:translate(0,0) rotate(0)}38%,62%{transform:translate(-3px,4px) rotate(-14deg)}75%,100%{transform:translate(0,0) rotate(0)}}
+@keyframes lines{0%,28%{opacity:0}40%,60%{opacity:1}72%,100%{opacity:0}}
+@keyframes meter{0%,25%{width:8%}38%,62%{width:72%}75%,100%{width:8%}}
+@keyframes meterColor{0%,49%{background:#3ddc84}50%,62%{background:var(--alert)}64%,100%{background:#3ddc84}}
+@keyframes pipBorder{0%,49%{border-color:#2a2f3a;box-shadow:none}50%,53%{border-color:var(--alert);box-shadow:0 0 0 4px rgba(229,72,77,.45)}56%{border-color:var(--alert);box-shadow:0 0 0 1px rgba(229,72,77,.15)}59%,62%{border-color:var(--alert);box-shadow:0 0 0 4px rgba(229,72,77,.45)}64%,100%{border-color:#2a2f3a;box-shadow:none}}
+@keyframes toast{0%,49%{opacity:0;transform:translateY(8px)}53%,63%{opacity:1;transform:translateY(0)}68%,100%{opacity:0;transform:translateY(8px)}}
+@media (prefers-reduced-motion:reduce){
+  .demo *{animation:none !important}
+  .toast{opacity:1;transform:none}
+  .pip{border-color:var(--alert)}
+  .lines{opacity:1}
+  .brow-l{transform:translate(3px,4px) rotate(14deg)}
+  .brow-r{transform:translate(-3px,4px) rotate(-14deg)}
+  .pip-hud .mf{width:72%;background:var(--alert)}
+  .vbar{width:60%}
+}
+
+/* ---- 本文 ---- */
+section{padding:28px 0}
+.card h3{font-size:16px;margin:0 0 8px}
+h2{font-size:22px;margin:0 0 18px}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}
+.bullets{margin:0;padding-left:20px;color:#4b4854;font-size:14px}
+.privacy{display:grid;grid-template-columns:1fr;gap:24px;align-items:start}
+.site-footer{margin-top:24px;padding:20px 0 32px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.footer-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.footer-brand{font-weight:700;color:var(--fg);display:flex;align-items:center;gap:8px}
+.footer-brand .logo{width:16px;height:16px;border-radius:5px}
+.footer-links{display:flex;gap:16px}
+.footer-links a{color:var(--muted);text-decoration:none}
+.footer-links a:hover{color:var(--accent-dark);text-decoration:underline}
+@media (max-width:820px){
+  .hero{grid-template-columns:1fr;gap:24px;padding:20px 0 32px}
+  .hero h1{font-size:28px}
+  .nav .hide-sm{display:none}
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>Frown Watch</h1>
-  <span class="sub">表情の癖に気づかせる試作。映像は PC の外に出ません。</span>
-</header>
-<main>
-  <div class="col">
-    <section class="panel">
-      <div id="stageHost">
-        <div id="stage" class="stage">
-          <video id="video" autoplay playsinline muted></video>
-          <canvas id="overlay" class="overlay"></canvas>
-          <canvas id="inset" class="inset"></canvas>
-          <div id="insetLabel" class="inset-label"></div>
-          <div class="hud">
-            <div id="alertLabel" class="alert-label"></div>
-            <div id="meters" class="meters"></div>
-            <div class="hud-footer"><span id="hudStatus">停止中</span><span id="hudCount"></span></div>
-          </div>
+<div class="wrap">
+  <header class="topbar">
+    <a class="brand" href="./"><span class="logo"></span>Frown Watch</a>
+    <nav class="nav">
+      <a href="#privacy" class="hide-sm">プライバシー</a>
+      <a class="btn primary small cta" href="app.html">はじめる</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <div>
+      <span class="tag">試作版 ・ Chrome で動きます</span>
+      <h1>安全に、<br>顔のお悩みチェック。</h1>
+      <p class="lead">Frown Watch は、内カメラで表情の癖を見守る Web アプリです。動画を見ている間に眉間へ力が入ったままになると、常に最前面の小窓が赤くなって知らせます。判定はこの PC の中だけで行い、動画は一切外部公開されません。</p>
+      <div class="cta">
+        <a class="btn primary cta" href="app.html">はじめる</a>
+      </div>
+      <p class="note">インストール不要。動画は一切外部公開されません。</p>
+    </div>
+    <div class="demo" aria-label="デモ: 動画を見ている間に眉間の力みを小窓で知らせる様子">
+      <div class="screen">
+        <div class="video"><div class="vt"></div><div class="vt short"></div><div class="vplay"><div class="vbar"></div></div></div>
+        <div class="toast"><span class="dot"></span>眉間に力が入っています</div>
+        <div class="pip">
+          <svg viewBox="0 0 120 90" aria-hidden="true">
+            <rect width="120" height="90" fill="#1a1d24"/>
+            <ellipse cx="60" cy="52" rx="30" ry="36" fill="#f0c6a6"/>
+            <path d="M30 44 Q60 4 90 44 Q60 26 30 44Z" fill="#3b2a24"/>
+            <ellipse cx="48" cy="54" rx="4" ry="3" fill="#2b2a33"/>
+            <ellipse cx="72" cy="54" rx="4" ry="3" fill="#2b2a33"/>
+            <path class="brow brow-l" d="M38 44 Q46 40 54 43" stroke="#3b2a24" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <path class="brow brow-r" d="M66 43 Q74 40 82 44" stroke="#3b2a24" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <g class="lines" stroke="#c98f6e" stroke-width="1.5" stroke-linecap="round"><path d="M57 42 v8"/><path d="M63 42 v8"/></g>
+            <path d="M52 70 Q60 74 68 70" stroke="#b86b5a" stroke-width="2" fill="none" stroke-linecap="round"/>
+          </svg>
+          <div class="pip-hud"><span>眉間</span><div class="m"><div class="mf"></div><div class="th"></div></div></div>
         </div>
       </div>
-      <div class="row" style="margin-top:12px">
-        <button id="btnStart" class="primary">カメラを開始</button>
-        <button id="btnPip" disabled>小窓にする</button>
-        <button id="btnCalib" disabled>無表情の基準を取る</button>
-        <button id="btnStop" disabled>停止</button>
+      <div class="caption"><span>動画を見ている間、小窓が表情を見守ります</span><span>2 秒続くと赤くなって知らせます</span></div>
+    </div>
+  </section>
+
+
+
+
+  <section id="privacy">
+    <h2>プライバシー</h2>
+    <div class="privacy">
+      <div class="card">
+        <h3>動画の扱い</h3>
+        <ul class="bullets">
+          <li>内カメラの動画はこの PC の中だけで処理し、一切外部公開されません</li>
+          <li>保存するのは、癖が出た回数と秒数、見守った時間、無表情の基準値だけです。ブラウザの中にだけ残ります</li>
+          <li>判定に使うライブラリとモデルはページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
+        </ul>
       </div>
-      <div id="status" class="status">準備中…</div>
-      <div id="baselineInfo" class="hint"></div>
-      <p class="hint">小窓は他のアプリの上にも残ります。小窓を出したまま、別タブや別アプリで YouTube を見てください。</p>
-    </section>
-    <section class="panel">
-      <h2>知らせ方</h2>
-      <div class="row">
-        <label class="chk"><input type="checkbox" id="optSound"> 音で知らせる</label>
-        <label class="chk"><input type="checkbox" id="optNotify"> 通知で知らせる</label>
-        <button id="btnTest">試しに鳴らす</button>
-      </div>
-      <div class="row">
-        <label>拡大して映す部位 <select id="focusArea"></select></label>
-      </div>
-      <p class="hint">枠の赤い点滅は癖が続いている間ずっと出ます。音と通知は「休止」の秒数だけ間隔をあけます。</p>
-    </section>
-  </div>
-  <div class="col">
-    <section class="panel">
-      <h2>見張る癖と条件</h2>
-      <table id="targets"></table>
-      <p class="hint">値は 0〜1。無表情の基準を取ると、基準からの増分で判定します。「今の値」を見ながらしきい値を決めてください。</p>
-    </section>
-    <section class="panel">
-      <h2>診断: 判定に使える生の値</h2>
-      <table id="diag"></table>
-      <p class="hint">思いきり顰めて、どの値が動くかを見るための表。判定には今のところ browDownLeft と browDownRight の平均だけを使っています。</p>
-    </section>
-    <section class="panel">
-      <h2>今日の記録</h2>
-      <div id="today"></div>
-      <h2 style="margin-top:14px">直近14日</h2>
-      <table id="history"></table>
-      <div class="row" style="margin-top:10px">
-        <button id="btnCsv">CSV をコピー</button>
-        <button id="btnReset">今日の記録を消す</button>
-      </div>
-    </section>
-    <section class="panel">
-      <h2>動作条件</h2>
-      <ul class="hint" style="margin:0;padding-left:18px">
-        <li>Chrome 116 以降。小窓表示は Safari と Firefox では使えません</li>
-        <li>http://localhost か https で開くこと。カメラの許可が必要です</li>
-        <li>判定ライブラリとモデルはこのページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
-        <li>映像は端末内で処理し、記録はこのブラウザの localStorage にだけ残ります</li>
-      </ul>
-    </section>
-    <section class="panel">
-      <h2>映像が外に出ないことの確認方法</h2>
-      <ul class="hint" style="margin:0;padding-left:18px">
-        <li>開発者ツールの Network タブを開いたままカメラを開始する。最初の読み込み以外に通信が起きません</li>
-        <li>カメラを開始したあとに Wi-Fi を切っても、そのまま動き続けます</li>
-        <li>このページの CSP で、配布元以外への通信をブラウザ自身が禁止しています。ページのソースの冒頭にある meta タグで確認できます</li>
-        <li>ビルド工程がなく、配布しているファイルがそのまま動きます。「ページのソースを表示」で全文を読めます</li>
-        <li>ソースコードは <a href="https://github.com/Taiki-jp/frown-watch">GitHub の公開リポジトリ</a> にあり、そこからそのまま配信しています</li>
-      </ul>
-    </section>
-  </div>
-</main>
-<script type="module" src="app.js"></script>
+    </div>
+  </section>
+
+
+  <footer class="site-footer">
+    <div class="footer-row">
+      <div class="footer-brand"><span class="logo"></span>Frown Watch <span id="version"></span></div>
+      <nav class="footer-links">
+        <a href="#privacy">プライバシー</a>
+        <a href="app.html#privacy">動作環境</a>
+        <a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener">ソースコード</a>
+      </nav>
+    </div>
+    <p style="margin:10px 0 0">動画は一切外部公開されません。記録はこのブラウザの中にだけ保存されます。</p>
+  </footer>
+</div>
+<script src="top.js"></script>
 </body>
 </html>

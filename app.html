@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<title>Frown Watch</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f7f4f1; --card:#ffffff; --fg:#28262e; --muted:#7b7784; --line:#ece6e1; --soft:#f3eeea;
+  --accent:#e26b6b; --accent-dark:#c75656; --accent-soft:#fbe9e7;
+  --ok:#2f9e7a; --ok-soft:#e3f4ec; --warn:#9a6b00; --warn-soft:#fdf1d8; --alert:#e5484d;
+  --radius:16px; --shadow:0 1px 2px rgba(40,20,10,.04),0 8px 24px rgba(40,20,10,.06);
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;-webkit-font-smoothing:antialiased}
+.app{max-width:720px;margin:0 auto;padding:16px 16px 40px}
+a{color:var(--accent-dark)}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 4px 16px}
+.brand{font-weight:700;font-size:18px;display:flex;align-items:center;gap:8px;color:var(--fg);text-decoration:none}
+.logo{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#f0a57a)}
+.pill{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:#ece8e4;color:var(--muted);white-space:nowrap}
+.pill-on{background:var(--ok-soft);color:var(--ok)}
+.pill-warn{background:var(--warn-soft);color:var(--warn)}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:16px}
+h1{font-size:24px;margin:0 0 8px;line-height:1.35}
+h2{font-size:17px;margin:0 0 8px}
+h3{font-size:13px;margin:18px 0 8px;color:var(--muted);font-weight:600}
+p{margin:0 0 12px}
+.muted{color:var(--muted);font-size:13px}
+.bullets{margin:0 0 12px;padding-left:20px;color:var(--muted);font-size:13px}
+.notice{background:var(--warn-soft);border:1px solid #f1dfb5;color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+button{font:inherit;border-radius:12px;padding:10px 16px;border:1px solid var(--line);background:#fff;color:var(--fg);cursor:pointer;font-weight:600}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{background:var(--accent-dark)}
+button.ghost{border-color:transparent;color:var(--muted);font-weight:500;padding-left:4px;padding-right:4px}
+button:disabled{opacity:.4;cursor:default}
+.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.status{min-height:1.5em;font-size:13px;color:var(--muted);margin:8px 0 0}
+
+/* ---- セットアップ ---- */
+.stepper{display:flex;gap:4px;list-style:none;margin:0 0 16px;padding:0;overflow-x:auto}
+.stepper li{flex:1;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding:6px 8px;border-radius:10px;white-space:nowrap}
+.stepper li span{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#e9e4df;font-size:11px;font-weight:700;flex:none}
+.stepper li.current{background:var(--accent-soft);color:var(--accent-dark)}
+.stepper li.current span{background:var(--accent);color:#fff}
+.stepper li.done span{background:var(--ok);color:#fff}
+.progress{height:10px;background:var(--soft);border-radius:5px;overflow:hidden;margin:12px 0}
+.progress div{height:100%;width:0;background:var(--accent);transition:width .25s linear}
+.toggles{display:flex;flex-direction:column;gap:12px;margin:12px 0}
+.toggle{display:flex;align-items:center;gap:10px;cursor:pointer;position:relative}
+.toggle input{position:absolute;opacity:0;width:0;height:0}
+.toggle span{width:40px;height:24px;border-radius:12px;background:#d9d2cc;position:relative;transition:background .2s;flex:none}
+.toggle span::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle input:checked+span{background:var(--accent)}
+.toggle input:checked+span::after{left:19px}
+
+/* ---- 今日 ---- */
+.hero-row{display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap}
+.stat .num{font-size:28px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat.big .num{font-size:46px;color:var(--accent-dark)}
+.stat .label{font-size:12px;color:var(--muted);margin-top:4px}
+.trend{font-size:13px;margin:10px 0 0;font-weight:600;color:var(--ok)}
+.trend.up{color:var(--alert)}
+.trend.na{color:var(--muted);font-weight:500}
+
+/* ---- 推移 ---- */
+.chart{display:flex;gap:6px;align-items:stretch;height:170px;margin:8px 0 4px}
+.chart.empty{position:relative}
+.chart.empty::before{content:"見守りを始めると、ここに日ごとの回数が並びます";position:absolute;inset:0 0 30px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0}
+.bar-track{flex:1;width:100%;display:flex;align-items:flex-end}
+.bar{width:100%;background:#f2c9c9;border-radius:4px 4px 0 0;min-height:2px}
+.bar.today{background:var(--accent)}
+.bar.empty{background:var(--soft)}
+.bar-val{font-size:11px;color:var(--muted);height:16px;font-variant-numeric:tabular-nums}
+.bar-label{font-size:10px;color:var(--muted);height:14px;white-space:nowrap}
+
+/* ---- 設定 ---- */
+details.card>summary{cursor:pointer;font-weight:700;font-size:16px;list-style:none;display:flex;justify-content:space-between;align-items:center}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary::after{content:"＋";color:var(--muted);font-weight:400}
+details.card[open]>summary::after{content:"－"}
+details.sub{margin-top:14px}
+details.sub>summary{font-size:13px;color:var(--muted);cursor:pointer}
+.field{margin-top:16px}
+.field-label{font-size:13px;font-weight:600;margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border-radius:999px;padding:6px 14px;font-size:13px;border:1px solid var(--line);background:#fff;font-weight:600;color:var(--muted)}
+.chip.on{background:var(--accent-soft);border-color:#f3c9c9;color:var(--accent-dark)}
+.segmented{display:inline-flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.segmented button{border:0;border-radius:0;padding:8px 14px;font-size:13px;color:var(--muted);background:#fff}
+.segmented button.on{background:var(--accent);color:#fff}
+select{font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:#fff}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:12px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+input[type=range]{width:100px;vertical-align:middle}
+input[type=range],input[type=checkbox]{accent-color:var(--accent)}
+input[type=number]{width:62px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;font:inherit}
+label.chk{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+small.k{color:var(--muted)}
+code{font-size:12px;color:var(--muted)}
+.live{display:inline-block;min-width:3.5em;text-align:right;font-variant-numeric:tabular-nums}
+.dbar{height:6px;width:120px;background:var(--soft);border-radius:3px}
+.dbar div{height:100%;background:var(--accent);border-radius:3px}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:16px 0 0}
+
+/* ---- カメラ画面。この要素ごと小窓（Document PiP）へ移動する ---- */
+.stage-host{margin:4px 0 8px}
+.stage{position:relative;width:100%;aspect-ratio:4/3;background:#000;border:4px solid #2a2f3a;border-radius:16px;overflow:hidden;transition:border-color .2s}
+.stage.alert{border-color:var(--alert);animation:pulse 1s ease-in-out infinite}
+.stage.ok{border-color:var(--ok)}
+@keyframes pulse{0%,100%{box-shadow:inset 0 0 0 0 rgba(229,72,77,0)}50%{box-shadow:inset 0 0 0 6px rgba(229,72,77,.5)}}
+.stage video,.stage canvas.overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.stage canvas.inset{position:absolute;top:8px;right:8px;width:42%;aspect-ratio:4/3;border:2px solid rgba(255,255,255,.75);border-radius:8px;background:#000;display:none}
+.stage.has-inset canvas.inset{display:block}
+.stage .inset-label{position:absolute;top:10px;right:8px;width:42%;text-align:center;font-size:11px;color:#fff;text-shadow:0 1px 2px #000;pointer-events:none;display:none}
+.stage.has-inset .inset-label{display:block}
+.hud{position:absolute;left:0;right:0;bottom:0;padding:8px 10px;background:linear-gradient(transparent,rgba(0,0,0,.75));pointer-events:none}
+.alert-label{font-weight:700;font-size:16px;color:#fff;text-shadow:0 1px 3px #000;min-height:1.4em}
+.stage.alert .alert-label{color:#ffd6d6}
+.meters{display:flex;flex-direction:column;gap:3px;margin-top:4px}
+.meter{display:flex;align-items:center;gap:6px;font-size:11px;color:#fff;text-shadow:0 1px 2px #000}
+.meter .m-label{width:4em;flex:none}
+.meter .m-bar{position:relative;flex:1;height:6px;background:rgba(255,255,255,.2);border-radius:3px}
+.meter .m-fill{height:100%;width:0;background:#3ddc84;border-radius:3px;transition:width .1s linear}
+.meter.over .m-fill{background:var(--alert)}
+.meter .m-th{position:absolute;top:-2px;width:2px;height:10px;background:#fff}
+.hud-footer{display:flex;justify-content:space-between;font-size:11px;color:#ddd;text-shadow:0 1px 2px #000;margin-top:4px}
+body.pip{background:#000;overflow:hidden;margin:0}
+body.pip .stage{width:100vw;height:100vh;border-radius:0}
+
+/* ---- 動作環境チェック ---- */
+.env{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fffdfb}
+.env .verdict{font-weight:700;margin-bottom:8px}
+.env .verdict.ok{color:var(--ok)} .env .verdict.ng{color:var(--alert)}
+.env ul{list-style:none;margin:0;padding:0}
+.env li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:13px;border-top:1px solid var(--line)}
+.env li .mark{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none;margin-top:3px}
+.env li.ok .mark{background:var(--ok-soft);color:var(--ok)} .env li.ng .mark{background:var(--accent-soft);color:var(--alert)} .env li.warn .mark{background:var(--warn-soft);color:var(--warn)}
+.env li .detail{color:var(--muted);margin-left:6px;font-size:12px}
+.env li .fix{color:var(--muted);font-size:12px}
+/* ---- 基準取得 ---- */
+.calib-row{display:flex;align-items:center;gap:14px;margin:12px 0}
+.calib-row .progress{flex:1;margin:0}
+.progress.done div{background:var(--ok)}
+.calib-count{font-size:28px;font-weight:700;width:2em;text-align:center;font-variant-numeric:tabular-nums;color:var(--accent-dark)}
+.calib-done{display:inline-flex;align-items:center;gap:8px;color:var(--ok);font-weight:700;animation:pop .45s cubic-bezier(.2,.9,.3,1.3)}
+.calib-done .mark{width:24px;height:24px;border-radius:50%;background:var(--ok);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+@keyframes pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+.stage .countdown{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:96px;font-weight:800;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.6);pointer-events:none}
+button.done{background:var(--ok-soft);border-color:transparent;color:var(--ok)}
+button.done:disabled{opacity:1}
+.stage-placeholder{aspect-ratio:4/3;border-radius:16px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;background:var(--soft)}
+/* ---- フッター ---- */
+.site-footer{margin-top:24px;padding:20px 4px 0;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.footer-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.footer-brand{font-weight:700;color:var(--fg);display:flex;align-items:center;gap:8px}
+.footer-brand .logo{width:16px;height:16px;border-radius:5px}
+.footer-links{display:flex;gap:16px}
+.footer-links a{color:var(--muted);text-decoration:none}
+.footer-links a:hover{color:var(--accent-dark);text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="./" title="トップページへ"><span class="logo"></span>Frown Watch</a>
+    <div id="statusPill" class="pill">停止中</div>
+  </header>
+
+  <!-- ---- セットアップ（初回） ---- -->
+  <section id="onboarding" hidden>
+    <ol class="stepper" id="stepper">
+      <li data-step="1"><span>1</span>はじめに</li>
+      <li data-step="2"><span>2</span>カメラ</li>
+      <li data-step="3"><span>3</span>基準</li>
+      <li data-step="4"><span>4</span>通知方法</li>
+      <li data-step="5"><span>5</span>小窓</li>
+    </ol>
+
+    <div class="card step" data-step="1">
+      <h1>はじめに</h1>
+      <p>動画を見ている間、内カメラで表情を見守ります。眉間に力が入ったままになると、小窓が赤くなって知らせます。</p>
+      <ul class="bullets">
+        <li>動画はこの PC の中だけで処理し、一切外部公開されません</li>
+        <li>保存するのは「何回」「何秒」という数字だけです</li>
+      </ul>
+      <div class="actions" style="margin-top:4px"><button id="envCheckBtn">動作環境を確認する</button></div>
+      <div id="envResult" class="env" hidden></div>
+      <div class="actions"><button class="primary" data-next>はじめる</button></div>
+    </div>
+
+    <div class="card step" data-step="2" hidden>
+      <h2>カメラを許可してください</h2>
+      <p>内カメラの映像をこの画面に映します。ブラウザの許可ダイアログで「許可」を選んでください。</p>
+      <div id="obStageHost" class="stage-host"></div>
+      <p id="obCameraStatus" class="status"></p>
+      <div class="actions">
+        <button id="obCamera" class="primary">カメラを許可する</button>
+        <button id="obCameraNext" data-next disabled>次へ</button>
+      </div>
+    </div>
+
+    <div class="card step" data-step="3" hidden>
+      <h2>無表情の基準を取ります</h2>
+      <p>正面を向いて、力を抜いた顔で 3 秒間そのままにしてください。この顔を「0」として、そこからの変化を見ます。明るい場所のほうが安定します。</p>
+      <div id="obCalibStageHost" class="stage-host"></div>
+      <div class="calib-row"><div class="progress"><div id="calibBar"></div></div><div id="calibCount" class="calib-count" hidden>3</div></div>
+      <div id="calibDone" class="calib-done" hidden><span class="mark">✓</span>基準を取りました</div>
+      <p id="obCalibStatus" class="status"></p>
+      <div class="actions">
+        <button id="obCalib" class="primary">基準を取る</button>
+        <button id="obCalibNext" data-next disabled>次へ</button>
+      </div>
+    </div>
+
+    <div class="card step" data-step="4" hidden>
+      <h2>通知方法</h2>
+      <p>癖が続くと、小窓の枠が赤く点滅します。加えて、音と通知を使うか選べます。鳴りすぎないよう、音と通知は間隔をあけて出します。</p>
+      <div class="toggles">
+        <label class="toggle"><input type="checkbox" class="optSound"><span></span>音で知らせる</label>
+        <label class="toggle"><input type="checkbox" class="optNotify"><span></span>通知で知らせる</label>
+      </div>
+      <div class="actions">
+        <button class="btnTest">試しに鳴らす</button>
+        <button class="primary" data-next>次へ</button>
+      </div>
+    </div>
+
+    <div class="card step" data-step="5" hidden>
+      <h2>小窓を出して、動画を見に行きましょう</h2>
+      <p>小窓はほかのアプリやタブの上にも残ります。小窓を出したまま YouTube などを見てください。このタブは閉じないでください。</p>
+      <p id="obPipNote" class="notice" hidden></p>
+      <div class="actions">
+        <button id="obPip" class="primary">小窓にして始める</button>
+        <button id="obFinish">小窓なしで始める</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- ふだんの画面 ---- -->
+  <main id="main" hidden>
+    <section class="card">
+      <div class="hero-row">
+        <div class="stat big"><div class="num" id="todayCount">0</div><div class="label">今日の回数</div></div>
+        <div class="stat"><div class="num" id="todayRate">–</div><div class="label">1 時間あたり</div></div>
+        <div class="stat"><div class="num" id="todayMinutes">0</div><div class="label">見守った分</div></div>
+      </div>
+      <p id="todayBreakdown" class="muted" style="margin:10px 0 0"></p>
+      <p id="trend" class="trend na"></p>
+    </section>
+
+    <section class="card">
+      <div id="mainStageHost" class="stage-host"></div>
+      <div class="actions">
+        <button id="btnStart" class="primary">見守りを開始</button>
+        <button id="btnPip" class="primary" hidden>小窓にする</button>
+        <button id="btnStop" hidden>停止</button>
+      </div>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>14 日の推移</h2>
+      <p class="muted">1 日の回数。棒の下は見守った分数です。</p>
+      <div id="chart" class="chart"></div>
+      <details class="sub"><summary>日ごとの数字</summary><table id="history"></table></details>
+    </section>
+
+    <details class="card">
+      <summary>設定</summary>
+      <div class="field"><div class="field-label">見守る癖</div><div id="habitChips" class="chips"></div></div>
+      <div class="field">
+        <div class="field-label">敏感さ</div>
+        <div class="segmented" id="sensitivity"><button data-v="sensitive">敏感</button><button data-v="normal">標準</button><button data-v="relaxed">鈍感</button></div>
+        <p class="muted" style="margin-top:6px">「敏感」はわずかな力みでも知らせます。鳴りすぎると感じたら「鈍感」にしてください。</p>
+      </div>
+      <div class="field"><div class="field-label">通知方法</div>
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" class="optSound"><span></span>音で知らせる</label>
+          <label class="toggle"><input type="checkbox" class="optNotify"><span></span>通知で知らせる</label>
+        </div>
+        <div class="actions" style="margin-top:0"><label>音と通知の間隔 <select id="cooldownSel"><option value="30">30 秒</option><option value="60">1 分</option><option value="180">3 分</option><option value="300">5 分</option></select></label><button class="btnTest">試しに鳴らす</button></div>
+      </div>
+      <div class="field"><div class="field-label">小窓で拡大して映す部位</div><select id="focusArea"></select></div>
+      <div class="field"><div class="field-label">無表情の基準</div><p id="baselineInfo" class="muted"></p><button id="btnCalib">基準を取り直す</button></div>
+      <div class="field"><div class="field-label">データ</div><p class="muted">記録はこのブラウザの中にだけあります。表計算ソフトに持ち出したり、今日の分を消したりできます。</p><div class="actions" style="margin-top:0"><button id="btnCsv">CSV をコピー</button><button id="btnReset" class="ghost">今日の記録を消す</button></div></div>
+      <details class="sub"><summary>詳細設定（しきい値・継続・休止）</summary><table id="targets"></table><p class="muted">値は 0〜1。基準からの増分で判定します。</p></details>
+      <div class="field"><button id="btnOnboarding" class="ghost">セットアップをやり直す</button></div>
+    </details>
+
+    <details class="card">
+      <summary>開発者向けの診断</summary>
+      <p class="muted">判定に使える生の値です。思いきり顰めて、どの値が動くかを見るための表です。</p>
+      <table id="diag"></table>
+    </details>
+  </main>
+
+  <details class="card" id="privacy">
+    <summary>プライバシーと動作環境</summary>
+    <h3>動画の扱い</h3>
+    <ul class="bullets">
+      <li>内カメラの動画はこの PC の中だけで処理し、一切外部公開されません</li>
+      <li>保存するのは、癖が出た回数と秒数、見守った時間、無表情の基準値だけです。このブラウザの中にだけ残ります</li>
+      <li>判定に使うライブラリとモデルはこのページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
+    </ul>
+    <h3>動画が外部公開されないことの確認方法</h3>
+    <ul class="bullets">
+      <li>開発者ツールの Network タブを開いたまま見守りを開始する。最初の読み込み以外に通信が起きません</li>
+      <li>見守りを開始したあとに Wi-Fi を切っても、そのまま動き続けます</li>
+      <li>このページの CSP で、配布元以外への通信をブラウザ自身が禁止しています。ページのソースの冒頭にある meta タグで確認できます</li>
+      <li>ビルド工程がなく、配布しているファイルがそのまま動きます。<a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener">ソースコード</a>と突き合わせられます</li>
+    </ul>
+    <h3>動作環境</h3>
+    <p class="muted">Chrome 116 以降を想定しています。小窓表示は Safari と Firefox では使えません。</p>
+    <div class="actions" style="margin-top:0"><button id="envCheckBtn2">動作環境を確認する</button></div>
+    <div id="envResult2" class="env" hidden></div>
+  </details>
+
+  <footer class="site-footer">
+    <div class="footer-row">
+      <div class="footer-brand"><span class="logo"></span>Frown Watch <span id="version" class="muted"></span></div>
+      <nav class="footer-links">
+        <a href="#privacy" id="linkPrivacy">プライバシー</a>
+        <a href="#privacy" id="linkEnv">動作環境</a>
+        <a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener">ソースコード</a>
+      </nav>
+    </div>
+    <p style="margin:10px 0 0">動画は一切外部公開されません。記録はこのブラウザの中にだけ保存されます。</p>
+  </footer>
+</div>
+
+<!-- カメラ画面の置き場。使うときにセットアップ画面やふだんの画面、小窓へ移動する -->
+<div id="stageParking" hidden>
+  <div id="stage" class="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay" class="overlay"></canvas>
+    <canvas id="inset" class="inset"></canvas>
+    <div id="insetLabel" class="inset-label"></div>
+    <div id="countdown" class="countdown" hidden></div>
+    <div class="hud">
+      <div id="alertLabel" class="alert-label"></div>
+      <div id="meters" class="meters"></div>
+      <div class="hud-footer"><span id="hudStatus">停止中</span><span id="hudCount"></span></div>
+    </div>
+  </div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

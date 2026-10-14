@@ -4,22 +4,23 @@ const MP_WASM = "./vendor/mediapipe/wasm";
 const MODEL_URL = "./vendor/models/face_landmarker.task";
 const PROCESS_INTERVAL_MS = 100; // 約 10fps
 const CALIB_MS = 3000;
+const APP_VERSION = "0.2.0";
 
 /*PURE-START*/
 const avg = (...xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const clamp01 = x => Math.max(0, Math.min(1, x));
 
-// 見張る癖。score は blendshape の値を返す関数 v(name) から癖の強さ（0〜1）を作る
+// 見守る癖。score は blendshape の値を返す関数 v(name) から癖の強さ（0〜1）を作る
 const TARGETS = {
-  glabella: { label: "眉間", desc: "眉を寄せる・下げる", defaults: { on: true, threshold: 0.30, duration: 2, cooldown: 45 },
+  glabella: { label: "眉間", desc: "眉を寄せる・下げる", defaults: { on: true, threshold: 0.30, duration: 2, cooldown: 60 },
     score: v => avg(v("browDownLeft"), v("browDownRight")) },
-  forehead: { label: "額", desc: "眉を上げて額にしわが寄る", defaults: { on: false, threshold: 0.35, duration: 2, cooldown: 45 },
+  forehead: { label: "額", desc: "眉を上げて額にしわが寄る", defaults: { on: true, threshold: 0.35, duration: 2, cooldown: 60 },
     score: v => Math.max(v("browInnerUp"), avg(v("browOuterUpLeft"), v("browOuterUpRight"))) },
-  squint: { label: "目元", desc: "目を細める。笑顔のときは数えない", defaults: { on: false, threshold: 0.35, duration: 2, cooldown: 45 },
+  squint: { label: "目元", desc: "目を細める。笑顔のときは数えない", defaults: { on: true, threshold: 0.35, duration: 2, cooldown: 60 },
     score: v => avg(v("mouthSmileLeft"), v("mouthSmileRight")) > 0.4 ? 0 : avg(v("eyeSquintLeft"), v("eyeSquintRight")) },
-  mouth: { label: "口角", desc: "口角が下がる", defaults: { on: false, threshold: 0.30, duration: 3, cooldown: 60 },
+  mouth: { label: "口角", desc: "口角が下がる", defaults: { on: true, threshold: 0.30, duration: 3, cooldown: 60 },
     score: v => avg(v("mouthFrownLeft"), v("mouthFrownRight")) },
-  jaw: { label: "口が開く", desc: "口がぽかんと開いたまま", defaults: { on: false, threshold: 0.25, duration: 5, cooldown: 60 },
+  jaw: { label: "口が開く", desc: "口がぽかんと開いたまま", defaults: { on: true, threshold: 0.25, duration: 5, cooldown: 60 },
     score: v => v("jawOpen") },
 };
 
@@ -138,10 +139,14 @@ function peakOf(name, fn = Math.max) {
 const loadJSON = (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } };
 const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+const SENSITIVITY = { sensitive: 0.7, normal: 1, relaxed: 1.4 }; // しきい値に掛ける係数
+const SETTINGS_VERSION = 2; // 2: 見守る癖を全部オンにした
+const round2 = x => Math.round(x * 100) / 100;
+
 function defaultSettings() {
   const targets = {};
   for (const [k, t] of Object.entries(TARGETS)) targets[k] = { ...t.defaults };
-  return { sound: true, notify: false, focus: "glabella", targets };
+  return { version: SETTINGS_VERSION, onboarded: false, sensitivity: "normal", sound: true, notify: false, focus: "glabella", targets };
 }
 function loadSettings() {
   const d = defaultSettings();
@@ -149,12 +154,13 @@ function loadSettings() {
   if (!s) return d;
   const targets = {};
   for (const k of Object.keys(TARGETS)) targets[k] = { ...d.targets[k], ...(s.targets?.[k] || {}) };
-  return { ...d, ...s, targets };
+  if ((s.version ?? 1) < 2) for (const k of Object.keys(TARGETS)) targets[k].on = true; // 古い設定は初期値に合わせる
+  return { ...d, ...s, targets, version: SETTINGS_VERSION };
 }
 const settings = loadSettings();
 const saveSettings = () => saveJSON("fw.settings", settings);
 
-let baseline = loadJSON("fw.baseline", null); // { at, values: { key: number } }
+let baseline = loadJSON("fw.baseline", null); // { at, values: { key: number }, geo, tex }
 const stats = loadJSON("fw.stats", {});       // { "YYYY-MM-DD": { faceSec, noFaceSec, targets: { key: { count, sec } } } }
 const saveStats = () => saveJSON("fw.stats", stats);
 
@@ -170,30 +176,73 @@ for (const day of Object.values(stats)) { // 癖の種類が増えたときに�
 function dateKey(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+const parseKey = dk => { const [y, m, d] = dk.split("-").map(Number); return new Date(y, m - 1, d); };
+const lastDays = n => { const out = []; for (let i = n - 1; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); out.push(dateKey(d)); } return out; };
 const todayStats = () => (stats[dateKey()] ??= emptyDay());
 const fmtMin = sec => (sec / 60).toFixed(1);
+const enabledKeys = () => Object.keys(TARGETS).filter(k => settings.targets[k].on);
+const dayCount = (s, keys = enabledKeys()) => keys.reduce((a, k) => a + (s.targets[k]?.count ?? 0), 0);
 
 // ---------- 要素 ----------
 const $ = id => document.getElementById(id);
 const els = {};
-for (const id of ["stageHost", "stage", "video", "overlay", "inset", "insetLabel", "alertLabel", "meters", "hudStatus", "hudCount",
-  "btnStart", "btnPip", "btnCalib", "btnStop", "status", "baselineInfo", "optSound", "optNotify", "btnTest", "focusArea",
-  "targets", "today", "history", "btnCsv", "btnReset", "diag"]) els[id] = $(id);
-
-const setStatus = msg => { els.status.textContent = msg; };
-const setHud = msg => { els.hudStatus.textContent = msg; };
+for (const id of ["statusPill", "onboarding", "main", "stepper", "obStageHost", "obCameraStatus", "obCamera", "obCameraNext",
+  "obCalibStageHost", "calibBar", "calibCount", "calibDone", "countdown", "obCalibStatus", "obCalib", "obCalibNext", "obPipNote", "obPip", "obFinish",
+  "envCheckBtn", "envResult", "envCheckBtn2", "envResult2", "version", "privacy", "linkPrivacy", "linkEnv", "mainStageHost",
+  "stage", "video", "overlay", "inset", "insetLabel", "alertLabel", "meters", "hudStatus", "hudCount",
+  "btnStart", "btnPip", "btnStop", "status", "todayCount", "todayRate", "todayMinutes", "todayBreakdown", "trend", "chart", "history",
+  "habitChips", "sensitivity", "cooldownSel", "focusArea", "baselineInfo", "btnCalib", "targets", "btnOnboarding",
+  "diag", "btnCsv", "btnReset"]) els[id] = $(id);
+const all = sel => [...document.querySelectorAll(sel)];
 
 // ---------- 実行状態 ----------
-let landmarker = null, stream = null, running = false, pipWindow = null;
+let landmarker = null, stream = null, running = false, pipWindow = null, currentHost = null, obStep = 1;
 let loopGen = 0, lastProcess = 0, lastTick = null, lastUi = 0, lastStatsRender = 0, frameCount = 0;
-let calib = null; // { until, sums, n }
+let calib = null; // { until, sums, geo, tex, n, texN }
 let audioCtx = null;
 const states = {};
 const liveEff = {};
 const resetStates = () => { for (const k of Object.keys(TARGETS)) states[k] = newTargetState(); };
 resetStates();
 
-// ---------- UI 構築 ----------
+// ---------- 状態の表示 ----------
+const PILL = {
+  off: ["", "停止中"], loading: ["pill-warn", "準備中"], on: ["pill-on", "見守り中"], pip: ["pill-on", "小窓で見守り中"],
+  noface: ["pill-warn", "顔が見つかりません"], dark: ["pill-warn", "暗くて不安定"], calib: ["pill-warn", "基準を取得中"],
+};
+function setState(kind) {
+  const [cls, text] = PILL[kind];
+  els.statusPill.className = "pill " + cls;
+  els.statusPill.textContent = text;
+  els.hudStatus.textContent = kind === "pip" ? "見守り中" : text;
+}
+function setStatus(msg) {
+  els.status.textContent = msg;
+  if (!els.onboarding.hidden) {
+    if (obStep === 2) els.obCameraStatus.textContent = msg;
+    if (obStep === 3) els.obCalibStatus.textContent = msg;
+  }
+}
+const pipSupported = () => "documentPictureInPicture" in window;
+
+// カメラ画面をどこに置くか。小窓に出ている間は戻り先だけ覚えておく
+function mountStage(host) {
+  currentHost = host;
+  if (!pipWindow && els.stage.parentElement !== host) host.append(els.stage);
+  updatePlaceholder();
+}
+function updatePlaceholder() {
+  for (const ph of document.querySelectorAll(".stage-placeholder")) ph.remove();
+  if (pipWindow && currentHost) currentHost.insertAdjacentHTML("beforeend", `<div class="stage-placeholder">映像は小窓に表示しています</div>`);
+}
+// セットアップのカメラ許可ボタン。許可できたらチェック印にして押せなくする
+function setCameraButton(done, loading = false) {
+  els.obCamera.disabled = done || loading;
+  els.obCamera.classList.toggle("done", done);
+  els.obCamera.textContent = done ? "✓ 許可されました" : loading ? "起動中…" : "カメラを許可する";
+}
+
+// ---------- 設定の UI ----------
 function buildTargetTable() {
   const rows = Object.entries(TARGETS).map(([k, t]) => {
     const c = settings.targets[k];
@@ -206,18 +255,18 @@ function buildTargetTable() {
     </tr>`;
   }).join("");
   els.targets.innerHTML = `<thead><tr><th>癖</th><th class="num">今の値</th><th>しきい値</th><th>継続</th><th>休止</th></tr></thead><tbody>${rows}</tbody>`;
-  els.targets.addEventListener("input", e => {
-    const tr = e.target.closest("tr"); const f = e.target.dataset.f;
-    if (!tr || !f) return;
-    const k = tr.dataset.key;
-    const v = f === "on" ? e.target.checked : parseFloat(e.target.value);
-    if (f !== "on" && !Number.isFinite(v)) return;
-    settings.targets[k][f] = v;
-    if (f === "threshold") tr.querySelector('[data-v="threshold"]').textContent = v.toFixed(2);
-    if (f === "on") states[k] = newTargetState();
-    saveSettings(); buildMeters(); renderStats();
-  });
 }
+els.targets.addEventListener("input", e => {
+  const tr = e.target.closest("tr"); const f = e.target.dataset.f;
+  if (!tr || !f) return;
+  const k = tr.dataset.key;
+  const v = f === "on" ? e.target.checked : parseFloat(e.target.value);
+  if (f !== "on" && !Number.isFinite(v)) return;
+  settings.targets[k][f] = v;
+  if (f === "threshold") tr.querySelector('[data-v="threshold"]').textContent = v.toFixed(2);
+  if (f === "on") states[k] = newTargetState();
+  saveSettings(); renderSettings(); buildMeters(); renderStats();
+});
 
 function buildMeters() {
   els.meters.innerHTML = Object.entries(TARGETS).filter(([k]) => settings.targets[k].on).map(([k, t]) =>
@@ -245,25 +294,101 @@ function applyFocus() {
   els.insetLabel.textContent = roi ? roi.label : "";
 }
 
-function renderBaselineInfo() {
-  if (!baseline) { els.baselineInfo.textContent = "基準: 未取得（無表情のときの値を 0 として判定しています）"; return; }
-  const when = new Date(baseline.at);
-  const parts = Object.keys(TARGETS).map(k => `${TARGETS[k].label} ${(baseline.values[k] ?? 0).toFixed(2)}`).join(" / ");
-  els.baselineInfo.textContent = `基準: ${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")} 取得。${parts}${baseline.geo ? ` / 眉頭の間隔 ${baseline.geo.gap.toFixed(3)} / 眉頭の高さ ${baseline.geo.drop.toFixed(3)}` : ""}`;
+// しきい値が「敏感・標準・鈍感」のどれに当たるか。手で変えてあればどれでもない
+function detectSensitivity() {
+  for (const [name, f] of Object.entries(SENSITIVITY)) {
+    if (Object.keys(TARGETS).every(k => Math.abs(settings.targets[k].threshold - round2(TARGETS[k].defaults.threshold * f)) < 0.001)) return name;
+  }
+  return null;
+}
+function applySensitivity(name) {
+  settings.sensitivity = name;
+  for (const k of Object.keys(TARGETS)) settings.targets[k].threshold = round2(TARGETS[k].defaults.threshold * SENSITIVITY[name]);
+  resetStates();
 }
 
+// 設定の表示をまとめて更新する。チップ、敏感さ、間隔、トグル、基準
+function renderSettings() {
+  els.habitChips.innerHTML = Object.entries(TARGETS).map(([k, t]) =>
+    `<button class="chip ${settings.targets[k].on ? "on" : ""}" data-k="${k}" title="${t.desc}">${t.label}</button>`).join("");
+  const sens = detectSensitivity();
+  for (const b of els.sensitivity.querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === sens);
+  const cds = Object.keys(TARGETS).map(k => settings.targets[k].cooldown);
+  const same = cds.every(c => c === cds[0]);
+  const custom = els.cooldownSel.querySelector('option[value="custom"]');
+  if (same && [...els.cooldownSel.options].some(o => o.value === String(cds[0]))) { custom?.remove(); els.cooldownSel.value = String(cds[0]); }
+  else { if (!custom) els.cooldownSel.insertAdjacentHTML("beforeend", `<option value="custom">個別</option>`); els.cooldownSel.value = "custom"; }
+  for (const el of all(".optSound")) el.checked = settings.sound;
+  for (const el of all(".optNotify")) el.checked = settings.notify;
+  if (!baseline) els.baselineInfo.textContent = "未取得。無表情のときの値を 0 として判定しています";
+  else {
+    const when = new Date(baseline.at);
+    const parts = Object.keys(TARGETS).map(k => `${TARGETS[k].label} ${(baseline.values[k] ?? 0).toFixed(2)}`).join(" / ");
+    els.baselineInfo.textContent = `${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")} に取得。${parts}${baseline.geo ? ` / 眉頭の間隔 ${baseline.geo.gap.toFixed(3)} / 眉頭の高さ ${baseline.geo.drop.toFixed(3)}` : ""}`;
+  }
+}
+els.habitChips.addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  const k = b.dataset.k;
+  settings.targets[k].on = !settings.targets[k].on; states[k] = newTargetState();
+  saveSettings(); renderSettings(); buildTargetTable(); buildMeters(); renderStats();
+});
+els.sensitivity.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  applySensitivity(b.dataset.v); saveSettings(); renderSettings(); buildTargetTable(); buildMeters();
+});
+els.cooldownSel.addEventListener("change", () => {
+  const v = parseInt(els.cooldownSel.value, 10); if (!Number.isFinite(v)) return;
+  for (const k of Object.keys(TARGETS)) settings.targets[k].cooldown = v;
+  saveSettings(); renderSettings(); buildTargetTable();
+});
+
+// ---------- 記録の表示 ----------
+// 1 時間あたりの回数。5 分以上見守った日だけ出す
+function rateOf(s) { return s && s.faceSec >= 300 ? dayCount(s) / (s.faceSec / 3600) : null; }
+function trendText() {
+  const days = lastDays(14);
+  const prev = days.slice(0, 7).map(dk => rateOf(stats[dk])).filter(v => v != null);
+  const cur = days.slice(7).map(dk => rateOf(stats[dk])).filter(v => v != null);
+  if (cur.length < 2 || prev.length < 2) return { cls: "na", text: "記録が溜まると、先週との比較が出ます。1 日 5 分以上の見守りが 2 日ずつ必要です。" };
+  const a = avg(...cur), b = avg(...prev);
+  if (b === 0) return { cls: "na", text: `先週は 0 回でした。今週は 1 時間あたり ${a.toFixed(1)} 回です。` };
+  const diff = (a / b - 1) * 100;
+  if (Math.abs(diff) < 5) return { cls: "na", text: `先週と同じくらいです。1 時間あたり ${a.toFixed(1)} 回。` };
+  return { cls: diff < 0 ? "down" : "up", text: `先週より ${Math.abs(diff).toFixed(0)}% ${diff < 0 ? "少ない" : "多い"}。1 時間あたり ${a.toFixed(1)} 回。` };
+}
 function renderStats() {
   const day = todayStats();
-  const keys = Object.keys(TARGETS);
-  els.today.innerHTML = `<table><thead><tr><th>癖</th><th class="num">回数</th><th class="num">合計秒</th></tr></thead><tbody>` +
-    keys.map(k => `<tr><td>${TARGETS[k].label}${settings.targets[k].on ? "" : ' <small class="k">（見張っていない）</small>'}</td><td class="num">${day.targets[k].count}</td><td class="num">${Math.round(day.targets[k].sec)}</td></tr>`).join("") +
-    `</tbody></table><p class="hint">見張った時間 ${fmtMin(day.faceSec)} 分。顔が映っていなかった時間 ${fmtMin(day.noFaceSec)} 分。</p>`;
-  const days = [];
-  for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); days.push(dateKey(d)); }
-  els.history.innerHTML = `<thead><tr><th>日付</th>${keys.map(k => `<th class="num">${TARGETS[k].label}</th>`).join("")}<th class="num">見張り分</th></tr></thead><tbody>` +
-    days.map(dk => {
-      const s = stats[dk];
-      return `<tr><td>${dk.slice(5).replace("-", "/")}</td>${keys.map(k => `<td class="num">${s ? s.targets[k].count : "–"}</td>`).join("")}<td class="num">${s ? fmtMin(s.faceSec) : "–"}</td></tr>`;
+  const keys = enabledKeys();
+  const count = dayCount(day, keys);
+  const hours = day.faceSec / 3600;
+  els.todayCount.textContent = count;
+  els.todayRate.textContent = day.faceSec >= 300 ? (count / hours).toFixed(1) : "–";
+  els.todayMinutes.textContent = Math.round(day.faceSec / 60);
+  els.todayBreakdown.textContent = keys.length
+    ? keys.map(k => `${TARGETS[k].label} ${day.targets[k].count} 回 ${Math.round(day.targets[k].sec)} 秒`).join(" ・ ")
+    : "見守る癖が選ばれていません。設定で選んでください";
+  const tr = trendText();
+  els.trend.className = "trend " + tr.cls; els.trend.textContent = tr.text;
+
+  const days = lastDays(14);
+  const vals = days.map(dk => stats[dk] ? dayCount(stats[dk], keys) : null);
+  const max = Math.max(1, ...vals.filter(v => v != null));
+  els.chart.classList.toggle("empty", vals.every(v => v == null));
+  els.chart.innerHTML = days.map((dk, i) => {
+    const v = vals[i]; const d = parseKey(dk);
+    const mins = stats[dk] ? Math.round(stats[dk].faceSec / 60) : 0;
+    const label = (i % 2 === 1) ? `${d.getMonth() + 1}/${d.getDate()}` : "";
+    const h = v == null ? 0 : Math.max(2, v / max * 100);
+    return `<div class="bar-col" title="${dk}: ${v ?? 0} 回、${mins} 分"><div class="bar-track"><div class="bar ${i === 13 ? "today" : ""} ${v == null ? "empty" : ""}" style="height:${h}%"></div></div><div class="bar-val">${v == null ? "" : (mins ? mins + "分" : "")}</div><div class="bar-label">${label}</div></div>`;
+  }).join("");
+
+  const allKeys = Object.keys(TARGETS);
+  els.history.innerHTML = `<thead><tr><th>日付</th>${allKeys.map(k => `<th class="num">${TARGETS[k].label}</th>`).join("")}<th class="num">見守り分</th><th class="num">1 時間あたり</th></tr></thead><tbody>` +
+    [...days].reverse().map(dk => {
+      const s = stats[dk]; if (!s) return "";
+      const r = rateOf(s);
+      return `<tr><td>${dk.slice(5).replace("-", "/")}</td>${allKeys.map(k => `<td class="num">${s.targets[k].count}</td>`).join("")}<td class="num">${fmtMin(s.faceSec)}</td><td class="num">${r == null ? "–" : r.toFixed(1)}</td></tr>`;
     }).join("") + `</tbody>`;
 }
 
@@ -275,7 +400,7 @@ function updateLiveValues() {
 }
 
 function renderDiag() {
-  if (!diag.scores || !diag.geo) { els.diag.innerHTML = `<tbody><tr><td class="hint">カメラを開始して顔が映ると表示します</td></tr></tbody>`; return; }
+  if (!diag.scores || !diag.geo) { els.diag.innerHTML = `<tbody><tr><td class="muted">見守りを開始して顔が映ると表示します</td></tr></tbody>`; return; }
   const pct = x => `${x >= 0 ? "+" : ""}${x.toFixed(0)}%`;
   const bsRows = DIAG_BLEND.map(n => {
     const v = diag.scores[n] ?? 0; const pk = peakOf(n) ?? v;
@@ -300,11 +425,12 @@ function renderDiag() {
 }
 
 function updateAlertUI() {
+  if (calib) { els.stage.classList.remove("alert"); els.alertLabel.textContent = "そのまま、力を抜いて…"; return; }
   const active = Object.keys(TARGETS).filter(k => settings.targets[k].on && states[k].active);
   els.stage.classList.toggle("alert", active.length > 0);
   els.alertLabel.textContent = active.length ? active.map(k => TARGETS[k].label).join("・") + "に力が入っています" : "";
   const day = todayStats();
-  els.hudCount.textContent = "今日 " + Object.keys(TARGETS).filter(k => settings.targets[k].on).map(k => `${TARGETS[k].label} ${day.targets[k].count}`).join(" / ");
+  els.hudCount.textContent = "今日 " + enabledKeys().map(k => `${TARGETS[k].label} ${day.targets[k].count}`).join(" / ");
 }
 
 // ---------- 知らせる ----------
@@ -337,6 +463,11 @@ function notify(k) {
       setTimeout(() => n.close(), 5000);
     } catch (e) { console.warn("[fw] notification failed", e); }
   }
+}
+function flashStage(label) {
+  els.stage.classList.add("alert");
+  els.alertLabel.textContent = label;
+  setTimeout(() => { if (!Object.keys(TARGETS).some(k => states[k].active)) { els.stage.classList.remove("alert"); els.alertLabel.textContent = ""; } }, 1500);
 }
 
 // ---------- 判定ループ ----------
@@ -372,18 +503,43 @@ function drawOverlay(landmarks) {
   ictx.restore();
 }
 
+function startCalib() {
+  if (!running) return;
+  calib = { until: performance.now() + CALIB_MS, sums: {}, geo: { gap: 0, drop: 0 }, tex: { energy: 0, vertical: 0 }, n: 0, texN: 0 };
+  resetStates();
+  els.calibBar.style.width = "0%"; els.calibBar.parentElement.classList.remove("done");
+  els.calibDone.hidden = true;
+  els.calibCount.hidden = false; els.calibCount.textContent = "3";
+  els.countdown.hidden = false; els.countdown.textContent = "3";
+  els.obCalib.disabled = true; els.obCalib.textContent = "計測中…"; els.btnCalib.disabled = true;
+  setStatus("3 秒間、無表情で正面を向いてください…");
+}
 function finishCalib() {
   const values = {};
-  for (const k of Object.keys(TARGETS)) values[k] = calib.n ? calib.sums[k] / calib.n : 0;
-  const geo = calib.n ? { gap: calib.geo.gap / calib.n, drop: calib.geo.drop / calib.n } : null;
+  for (const k of Object.keys(TARGETS)) values[k] = calib.sums[k] / calib.n;
+  const geo = { gap: calib.geo.gap / calib.n, drop: calib.geo.drop / calib.n };
   const tex = calib.texN ? { energy: calib.tex.energy / calib.texN, vertical: calib.tex.vertical / calib.texN } : null;
   baseline = { at: Date.now(), values, geo, tex };
   saveJSON("fw.baseline", baseline);
   calib = null;
   resetStates();
-  renderBaselineInfo();
-  setStatus("無表情の基準を取りました。ここからの増分で判定します");
+  renderSettings();
+  els.calibBar.style.width = "100%"; els.calibBar.parentElement.classList.add("done");
+  els.calibCount.hidden = true; els.countdown.hidden = true;
+  els.calibDone.hidden = false;
+  els.calibDone.style.animation = "none"; void els.calibDone.offsetWidth; els.calibDone.style.animation = ""; // 完了の動きを毎回出す
+  els.stage.classList.add("ok"); setTimeout(() => els.stage.classList.remove("ok"), 1200);
+  els.obCalib.disabled = false; els.obCalib.textContent = "取り直す"; els.btnCalib.disabled = false;
+  els.obCalibNext.disabled = false;
+  setStatus("無表情の基準を取りました。ここからの変化で判定します");
   console.log("[fw] baseline", values);
+}
+function cancelCalib() {
+  calib = null;
+  els.calibBar.style.width = "0%";
+  els.calibCount.hidden = true; els.countdown.hidden = true;
+  els.obCalib.disabled = false; els.obCalib.textContent = baseline ? "取り直す" : "基準を取る"; els.btnCalib.disabled = false;
+  setStatus("顔が見つからず、基準を取れませんでした。明るい場所で正面を向いて、もう一度試してください");
 }
 
 function processFrame(now) {
@@ -402,7 +558,7 @@ function processFrame(now) {
     day.noFaceSec += dt;
     diag.scores = null; diag.geo = null; diag.tex = null;
     for (const k of Object.keys(TARGETS)) { liveEff[k] = null; states[k].active = false; states[k].aboveSince = null; }
-    setHud("顔が見つかりません");
+    setState("noface");
     drawOverlay(null); updateMeters(); updateAlertUI();
   } else {
     day.faceSec += dt;
@@ -420,7 +576,6 @@ function processFrame(now) {
       for (const [k, t] of Object.entries(TARGETS)) calib.sums[k] = (calib.sums[k] || 0) + t.score(v);
       calib.geo.gap += geo.gap; calib.geo.drop += geo.drop;
       if (tex) { calib.texN++; calib.tex.energy += tex.energy; calib.tex.vertical += tex.vertical; }
-      if (now >= calib.until) finishCalib();
     }
     for (const [k, t] of Object.entries(TARGETS)) {
       const eff = Math.max(0, t.score(v) - (baseline?.values?.[k] ?? 0));
@@ -432,10 +587,20 @@ function processFrame(now) {
       if (out.activeSec) day.targets[k].sec += out.activeSec;
       if (out.alert) notify(k);
     }
-    setHud(calib ? "基準を取得中…" : (tex && tex.luma < 50) ? "見張り中。暗くて不安定です" : "見張り中");
+    setState(calib ? "calib" : (tex && tex.luma < 50) ? "dark" : pipWindow ? "pip" : "on");
     drawOverlay(lm); updateMeters(); updateAlertUI();
   }
 
+  if (calib) {
+    const remain = calib.until - now;
+    if (remain <= 0) { if (calib.n > 0) finishCalib(); else cancelCalib(); }
+    else if (now - lastUi > 250) {
+      const n = Math.ceil(remain / 1000);
+      els.calibBar.style.width = `${(1 - remain / CALIB_MS) * 100}%`;
+      els.calibCount.textContent = n; els.countdown.textContent = n;
+      setStatus(`そのまま… あと ${n} 秒`);
+    }
+  }
   if (now - lastUi > 250) { lastUi = now; updateLiveValues(); renderDiag(); }
   if (now - lastStatsRender > 2000) { lastStatsRender = now; saveStats(); renderStats(); }
 }
@@ -469,33 +634,43 @@ async function createLandmarker() {
   catch (e) { console.warn("[fw] GPU delegate failed, fallback to CPU", e); return await FaceLandmarker.createFromOptions(vision, opts("CPU")); }
 }
 
-const pipSupported = () => "documentPictureInPicture" in window;
+function setButtons(mode) { // idle | loading | running
+  els.btnStart.hidden = mode === "running";
+  els.btnStart.disabled = mode === "loading";
+  els.btnStart.textContent = mode === "loading" ? "準備中…" : "見守りを開始";
+  els.btnPip.hidden = !(mode === "running" && pipSupported());
+  els.btnStop.hidden = mode !== "running";
+  els.btnPip.textContent = pipWindow ? "小窓を閉じる" : "小窓にする";
+  setCameraButton(mode === "running", mode === "loading");
+}
 
 async function start() {
-  els.btnStart.disabled = true;
+  if (running) return true;
   ensureAudio();
+  setButtons("loading"); setState("loading");
   try {
     if (!landmarker) {
-      setStatus("判定モデルを読み込み中…（初回だけ数秒かかります）");
+      setStatus("判定モデルを読み込んでいます…");
       landmarker = await createLandmarker();
       console.log("[fw] model loaded");
     }
-    setStatus("カメラを起動中…");
+    setStatus("カメラを起動しています…");
     stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
     els.video.srcObject = stream;
     await els.video.play();
     console.log("[fw] camera started", els.video.videoWidth, els.video.videoHeight);
     running = true; lastTick = null; lastProcess = 0; frameCount = 0;
     resetStates();
-    els.btnPip.disabled = !pipSupported(); els.btnCalib.disabled = false; els.btnStop.disabled = false;
-    setStatus(pipSupported()
-      ? "見張っています。「小窓にする」を押すと、他のアプリの上に残ります"
-      : "見張っています。この Chrome は小窓表示に未対応です（Chrome 116 以降で使えます）");
+    setButtons("running"); setState("on");
+    setStatus(pipSupported() ? "見守っています。「小窓にする」を押すと、ほかのアプリの上に残ります" : "見守っています。このタブが見えている間だけ判定します");
     scheduleNext();
+    return true;
   } catch (e) {
     console.error("[fw] start failed", e);
-    setStatus("開始できませんでした: " + (e?.message || e));
-    els.btnStart.disabled = false;
+    const denied = e?.name === "NotAllowedError";
+    setStatus(denied ? "カメラの許可が得られませんでした。アドレスバーのカメラのアイコンから許可してください" : "開始できませんでした: " + (e?.message || e));
+    setButtons("idle"); setState("off");
+    return false;
   }
 }
 
@@ -509,8 +684,7 @@ function stop() {
   diag.scores = null; diag.geo = null; diag.tex = null;
   updateMeters(); updateAlertUI(); updateLiveValues(); renderDiag(); drawOverlay(null);
   saveStats(); renderStats();
-  setHud("停止中"); setStatus("停止しました");
-  els.btnStart.disabled = false; els.btnPip.disabled = true; els.btnCalib.disabled = true; els.btnStop.disabled = true;
+  setButtons("idle"); setState("off"); setStatus("停止しました");
 }
 
 async function togglePip() {
@@ -528,14 +702,15 @@ async function togglePip() {
     pip.document.body.append(els.stage);
     els.video.play().catch(() => {});
     pipWindow = pip;
-    els.btnPip.textContent = "小窓を閉じる";
-    setStatus("小窓で見張っています。このタブを離れても判定は続きます");
+    updatePlaceholder();
+    setButtons("running"); if (running) setState("pip");
+    setStatus("小窓で見守っています。このタブを離れても判定は続きます");
     pip.addEventListener("pagehide", () => {
-      els.stageHost.append(els.stage);
       pipWindow = null;
+      (currentHost || els.mainStageHost).append(els.stage);
+      updatePlaceholder();
       els.video.play().catch(() => {});
-      els.btnPip.textContent = "小窓にする";
-      if (running) setStatus("小窓を閉じました。このタブが見えている間だけ判定します");
+      if (running) { setButtons("running"); setState("on"); setStatus("小窓を閉じました。このタブが見えている間だけ判定します"); }
       scheduleNext();
     });
     scheduleNext();
@@ -545,42 +720,145 @@ async function togglePip() {
   }
 }
 
-function startCalib() {
-  if (!running) return;
-  calib = { until: performance.now() + CALIB_MS, sums: {}, geo: { gap: 0, drop: 0 }, tex: { energy: 0, vertical: 0 }, n: 0, texN: 0 };
-  setStatus("3 秒間、無表情で正面を向いてください…");
+// ---------- 動作環境チェック ----------
+async function checkEnvironment() {
+  const ua = navigator.userAgent;
+  let name = "不明なブラウザ", ver = 0, chromium = false;
+  const brands = navigator.userAgentData?.brands || [];
+  const b = brands.find(x => /Google Chrome|Microsoft Edge/.test(x.brand)) || brands.find(x => /Chromium/.test(x.brand));
+  let m;
+  if (b) { chromium = true; name = b.brand.replace("Google ", "").replace("Microsoft ", ""); ver = parseInt(b.version, 10) || 0; }
+  else if ((m = ua.match(/Edg\/(\d+)/))) { chromium = true; name = "Edge"; ver = Number(m[1]); }
+  else if ((m = ua.match(/Chrome\/(\d+)/))) { chromium = true; name = "Chrome"; ver = Number(m[1]); }
+  else if ((m = ua.match(/Firefox\/(\d+)/))) { name = "Firefox"; ver = Number(m[1]); }
+  else if ((m = ua.match(/Version\/(\d+).*Safari/))) { name = "Safari"; ver = Number(m[1]); }
+  let cams = null;
+  try { // 機器の列挙が返ってこない環境でも確認が止まらないよう、2 秒で諦める
+    const devices = await Promise.race([navigator.mediaDevices.enumerateDevices(), new Promise(res => setTimeout(() => res(null), 2000))]);
+    cams = devices ? devices.filter(d => d.kind === "videoinput").length : null;
+  } catch { cams = null; }
+  const items = [
+    { label: "ブラウザ", ok: chromium && ver >= 116, required: true, detail: `${name} ${ver || ""}`.trim(),
+      fix: chromium ? "Chrome を 116 以降に更新してください" : "Chrome で開いてください。Safari と Firefox では小窓が使えません" },
+    { label: "安全な接続", ok: !!window.isSecureContext, required: true, detail: location.origin,
+      fix: "https か http://localhost で開いてください。カメラは安全な接続でしか使えません" },
+    { label: "カメラを使う機能", ok: !!navigator.mediaDevices?.getUserMedia, required: true, detail: "",
+      fix: "このブラウザではカメラを扱えません" },
+    { label: "カメラの機器", ok: cams == null ? true : cams > 0, required: true, detail: cams == null ? "確認できませんでした" : `${cams} 台`,
+      fix: "カメラが見つかりません。内蔵カメラのある PC か、外付けカメラをつないでください" },
+    { label: "小窓（常に最前面）", ok: pipSupported(), required: false, detail: "",
+      fix: "小窓なしでも使えますが、このタブが見える位置にある間だけ判定します" },
+    { label: "通知", ok: "Notification" in window, required: false, detail: "",
+      fix: "通知は使えません。音と小窓の赤い枠で知らせます" },
+    { label: "判定の高速化（WebGL2）", ok: !!document.createElement("canvas").getContext("webgl2"), required: false, detail: "",
+      fix: "高速化なしで動きます。電池の減りが早くなることがあります" },
+  ];
+  return { ok: items.every(i => i.ok || !i.required), items };
+}
+function renderEnv(container, r) {
+  const ng = r.items.filter(i => !i.ok && i.required), warn = r.items.filter(i => !i.ok && !i.required);
+  const verdict = r.ok
+    ? (warn.length ? `使えます。ただし ${warn.map(i => i.label).join("、")} は使えません` : "使えます。必要なものはすべて揃っています")
+    : `このままでは使えません。${ng.map(i => i.label).join("、")} に問題があります`;
+  container.hidden = false;
+  container.innerHTML = `<div class="verdict ${r.ok ? "ok" : "ng"}">${r.ok ? "✓" : "✗"} ${verdict}</div><ul>` +
+    r.items.map(i => `<li class="${i.ok ? "ok" : i.required ? "ng" : "warn"}"><span class="mark">${i.ok ? "✓" : "!"}</span><div><div>${i.label}${i.detail ? `<span class="detail">${i.detail}</span>` : ""}</div>${i.ok ? "" : `<div class="fix">${i.fix}</div>`}</div></li>`).join("") + `</ul>`;
+}
+async function runEnvCheck(btn, container) {
+  btn.disabled = true; const label = btn.textContent; btn.textContent = "確認中…";
+  try { renderEnv(container, await checkEnvironment()); }
+  finally { btn.disabled = false; btn.textContent = label; }
 }
 
-function flashStage(label) {
-  els.stage.classList.add("alert");
-  els.alertLabel.textContent = label;
-  setTimeout(() => { if (!Object.keys(TARGETS).some(k => states[k].active)) { els.stage.classList.remove("alert"); els.alertLabel.textContent = ""; } }, 1500);
+// ---------- セットアップ ----------
+function showOnboarding(step = 1) {
+  els.onboarding.hidden = false; els.main.hidden = true;
+  showStep(step);
+}
+function showMain() {
+  els.onboarding.hidden = true; els.main.hidden = false;
+  mountStage(els.mainStageHost);
+  renderStats();
+}
+function showStep(n) {
+  obStep = n;
+  for (const s of els.onboarding.querySelectorAll(".step")) s.hidden = Number(s.dataset.step) !== n;
+  for (const li of els.stepper.querySelectorAll("li")) {
+    const k = Number(li.dataset.step);
+    li.classList.toggle("current", k === n); li.classList.toggle("done", k < n);
+  }
+  if (n === 2) {
+    mountStage(els.obStageHost);
+    setCameraButton(running);
+    els.obCameraNext.disabled = !running;
+    els.obCameraStatus.textContent = running ? "カメラは動いています。次へ進んでください" : "";
+  }
+  if (n === 3) {
+    mountStage(els.obCalibStageHost);
+    els.obCalibNext.disabled = !baseline;
+    els.calibBar.style.width = baseline ? "100%" : "0%";
+    els.calibBar.parentElement.classList.toggle("done", !!baseline);
+    els.calibDone.hidden = !baseline;
+    els.calibCount.hidden = true;
+    els.obCalib.textContent = baseline ? "取り直す" : "基準を取る";
+    els.obCalibStatus.textContent = baseline ? "基準は取得済みです。取り直すこともできます" : "";
+  }
+  if (n === 5) {
+    const ok = pipSupported();
+    els.obPipNote.hidden = ok; els.obPip.hidden = !ok;
+    if (!ok) els.obPipNote.textContent = "この Chrome では小窓が使えません。このタブを開いたまま、別の窓で動画を見てください。Chrome 116 以降なら小窓が使えます";
+  }
+  window.scrollTo({ top: 0 });
+}
+function finishOnboarding() {
+  settings.onboarded = true; saveSettings();
+  showMain();
 }
 
 // ---------- イベント ----------
-els.btnStart.addEventListener("click", start);
+for (const b of els.onboarding.querySelectorAll("[data-next]")) b.addEventListener("click", () => showStep(obStep + 1));
+els.obCamera.addEventListener("click", async () => {
+  mountStage(els.obStageHost);
+  if (await start()) { setCameraButton(true); els.obCameraNext.disabled = false; els.obCameraStatus.textContent = "映りました。次へ進んでください"; }
+});
+els.obCalib.addEventListener("click", async () => {
+  if (!running) { mountStage(els.obCalibStageHost); if (!(await start())) return; }
+  startCalib();
+});
+els.obPip.addEventListener("click", () => { const p = togglePip(); finishOnboarding(); return p; });
+els.obFinish.addEventListener("click", async () => { finishOnboarding(); if (!running) await start(); });
+
+els.btnStart.addEventListener("click", () => { mountStage(els.mainStageHost); start(); });
 els.btnStop.addEventListener("click", stop);
 els.btnPip.addEventListener("click", togglePip);
-els.btnCalib.addEventListener("click", startCalib);
-els.btnTest.addEventListener("click", () => {
+els.btnCalib.addEventListener("click", async () => {
+  if (!running) { mountStage(els.mainStageHost); if (!(await start())) return; }
+  startCalib();
+});
+els.btnOnboarding.addEventListener("click", () => { settings.onboarded = false; saveSettings(); showOnboarding(1); });
+els.envCheckBtn.addEventListener("click", () => runEnvCheck(els.envCheckBtn, els.envResult));
+els.envCheckBtn2.addEventListener("click", () => runEnvCheck(els.envCheckBtn2, els.envResult2));
+els.linkPrivacy.addEventListener("click", () => { els.privacy.open = true; });
+els.linkEnv.addEventListener("click", () => { els.privacy.open = true; runEnvCheck(els.envCheckBtn2, els.envResult2); });
+
+for (const b of all(".btnTest")) b.addEventListener("click", () => {
   ensureAudio();
   flashStage("テスト: 眉間に力が入っています");
-  if (!settings.sound && !settings.notify) setStatus("音も通知もオフです。枠の点滅だけで知らせます");
+  if (!settings.sound && !settings.notify) setStatus("音も通知もオフです。小窓の枠が赤くなるだけで知らせます");
   else { states.glabella.lastAlertAt = -Infinity; notify("glabella"); }
 });
-els.optSound.checked = settings.sound;
-els.optSound.addEventListener("change", () => { settings.sound = els.optSound.checked; if (settings.sound) ensureAudio(); saveSettings(); });
-els.optNotify.checked = settings.notify && "Notification" in window && Notification.permission === "granted";
-settings.notify = els.optNotify.checked;
-els.optNotify.addEventListener("change", async () => {
-  if (els.optNotify.checked) {
-    if (!("Notification" in window)) { setStatus("この環境では通知が使えません"); els.optNotify.checked = false; }
+for (const el of all(".optSound")) el.addEventListener("change", () => {
+  settings.sound = el.checked; if (settings.sound) ensureAudio(); saveSettings(); renderSettings();
+});
+for (const el of all(".optNotify")) el.addEventListener("change", async () => {
+  if (el.checked) {
+    if (!("Notification" in window)) { setStatus("この環境では通知が使えません"); el.checked = false; }
     else if (await Notification.requestPermission() !== "granted") {
       setStatus("通知が許可されていません。Chrome の通知設定と、macOS の通知設定で Chrome を許可してください");
-      els.optNotify.checked = false;
+      el.checked = false;
     }
   }
-  settings.notify = els.optNotify.checked; saveSettings();
+  settings.notify = el.checked; saveSettings(); renderSettings();
 });
 els.btnCsv.addEventListener("click", async () => {
   const keys = Object.keys(TARGETS);
@@ -603,8 +881,16 @@ els.video.addEventListener("loadedmetadata", () => {
 window.addEventListener("beforeunload", saveStats);
 
 // ---------- 初期化 ----------
-buildTargetTable(); buildMeters(); buildFocusSelect(); renderBaselineInfo(); renderStats(); updateAlertUI(); renderDiag();
-if (!navigator.mediaDevices?.getUserMedia) setStatus("このブラウザではカメラが使えません。http://localhost か https で開いてください");
-else if (!pipSupported()) setStatus("準備できました。小窓表示はこの Chrome では使えません（Chrome 116 以降が必要）");
-else setStatus("準備できました。「カメラを開始」を押してください");
-if (new URLSearchParams(location.search).has("autostart")) start();
+if (settings.notify && !("Notification" in window && Notification.permission === "granted")) settings.notify = false;
+buildTargetTable(); buildMeters(); buildFocusSelect(); renderSettings(); renderStats(); updateAlertUI(); renderDiag();
+setButtons("idle"); setState("off");
+els.version.textContent = `v${APP_VERSION} 試作`;
+checkEnvironment().then(r => { if (!r.ok) renderEnv(els.envResult, r); }); // 足りないものがあれば最初から見せる
+const params = new URLSearchParams(location.search);
+if (params.has("open")) for (const d of document.querySelectorAll("details")) d.open = true;
+if (params.has("env")) runEnvCheck(els.envCheckBtn, els.envResult);
+if (location.hash === "#privacy") { els.privacy.open = true; els.privacy.scrollIntoView(); }
+if (params.has("ob")) showOnboarding(Number(params.get("ob")) || 1);
+else if (params.has("autostart")) { showMain(); start(); }
+else if (settings.onboarded) showMain();
+else showOnboarding(1);
