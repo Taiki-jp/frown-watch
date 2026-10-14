@@ -97,6 +97,9 @@ h2{font-size:22px;margin:0 0 18px}
   .hero h1{font-size:28px}
   .nav .hide-sm{display:none}
 }
+.lang{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-size:12px;background:#fff}
+.lang button{border:0;border-radius:0;padding:4px 10px;background:#fff;color:var(--muted);font-weight:600;font-size:12px;cursor:pointer;font-family:inherit}
+.lang button.on{background:var(--fg);color:#fff}
 </style>
 </head>
 <body>
@@ -104,25 +107,26 @@ h2{font-size:22px;margin:0 0 18px}
   <header class="topbar">
     <a class="brand" href="./"><span class="logo"></span>Frown Watch</a>
     <nav class="nav">
-      <a href="#privacy" class="hide-sm">プライバシー</a>
+      <div class="lang" id="lang"><button data-lang="ja">日本語</button><button data-lang="en">EN</button></div>
+      <a href="#privacy" class="hide-sm" data-i18n="nav.privacy">プライバシー</a>
       <a class="btn primary small cta" href="app.html">はじめる</a>
     </nav>
   </header>
 
-  <section class="hero">
+  <section class="hero" style="padding-bottom:16px">
     <div>
-      <span class="tag">試作版 ・ Chrome で動きます</span>
-      <h1>安全に、<br>顔のお悩みチェック。</h1>
-      <p class="lead">Frown Watch は、内カメラで表情の癖を見守る Web アプリです。動画を見ている間に眉間へ力が入ったままになると、常に最前面の小窓が赤くなって知らせます。判定はこの PC の中だけで行い、動画は一切外部公開されません。</p>
+      <span class="tag" data-i18n="hero.tag">試作版 ・ Chrome で動きます</span>
+      <h1 data-i18n-html="hero.title">安全に、<br>顔のお悩みチェック。</h1>
+      <p class="lead" data-i18n="hero.lead">Frown Watch は、内カメラで表情の癖を見守る Web アプリです。動画を見ている間に眉間へ力が入ったままになると、常に最前面の小窓が赤くなって知らせます。判定はこの PC の中だけで行い、動画は一切外部公開されません。</p>
       <div class="cta">
         <a class="btn primary cta" href="app.html">はじめる</a>
       </div>
-      <p class="note">インストール不要。動画は一切外部公開されません。</p>
+      <p class="note" data-i18n="hero.note">インストール不要。動画は一切外部公開されません。</p>
     </div>
-    <div class="demo" aria-label="デモ: 動画を見ている間に眉間の力みを小窓で知らせる様子">
+    <div class="demo" data-i18n-aria="demo.aria" aria-label="デモ: 動画を見ている間に眉間の力みを小窓で知らせる様子">
       <div class="screen">
         <div class="video"><div class="vt"></div><div class="vt short"></div><div class="vplay"><div class="vbar"></div></div></div>
-        <div class="toast"><span class="dot"></span>眉間に力が入っています</div>
+        <div class="toast"><span class="dot"></span><em data-i18n="demo.toast">眉間に力が入っています</em></div>
         <div class="pip">
           <svg viewBox="0 0 120 90" aria-hidden="true">
             <rect width="120" height="90" fill="#1a1d24"/>
@@ -135,43 +139,39 @@ h2{font-size:22px;margin:0 0 18px}
             <g class="lines" stroke="#c98f6e" stroke-width="1.5" stroke-linecap="round"><path d="M57 42 v8"/><path d="M63 42 v8"/></g>
             <path d="M52 70 Q60 74 68 70" stroke="#b86b5a" stroke-width="2" fill="none" stroke-linecap="round"/>
           </svg>
-          <div class="pip-hud"><span>眉間</span><div class="m"><div class="mf"></div><div class="th"></div></div></div>
+          <div class="pip-hud"><span data-i18n="habit.glabella">眉間</span><div class="m"><div class="mf"></div><div class="th"></div></div></div>
         </div>
       </div>
-      <div class="caption"><span>動画を見ている間、小窓が表情を見守ります</span><span>2 秒続くと赤くなって知らせます</span></div>
+      <div class="caption"><span data-i18n="demo.cap1">動画を見ている間、小窓が表情を見守ります</span><span data-i18n="demo.cap2">2 秒続くと赤くなって知らせます</span></div>
     </div>
   </section>
 
-
-
-
   <section id="privacy">
-    <h2>プライバシー</h2>
+    <h2 data-i18n="privacy.title">プライバシー</h2>
     <div class="privacy">
       <div class="card">
-        <h3>動画の扱い</h3>
+        <h3 data-i18n="privacy.videoTitle">動画の扱い</h3>
         <ul class="bullets">
-          <li>内カメラの動画はこの PC の中だけで処理し、一切外部公開されません</li>
-          <li>保存するのは、癖が出た回数と秒数、見守った時間、無表情の基準値だけです。ブラウザの中にだけ残ります</li>
-          <li>判定に使うライブラリとモデルはページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
+          <li data-i18n="privacy.b1">内カメラの動画はこの PC の中だけで処理し、一切外部公開されません</li>
+          <li data-i18n="privacy.b2">保存するのは、癖が出た回数と秒数、見守った時間、無表情の基準値だけです。ブラウザの中にだけ残ります</li>
+          <li data-i18n="privacy.b3">判定に使うライブラリとモデルはページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
         </ul>
       </div>
     </div>
   </section>
 
-
   <footer class="site-footer">
     <div class="footer-row">
       <div class="footer-brand"><span class="logo"></span>Frown Watch <span id="version"></span></div>
       <nav class="footer-links">
-        <a href="#privacy">プライバシー</a>
-        <a href="app.html#privacy">動作環境</a>
-        <a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener">ソースコード</a>
+        <a href="#privacy" data-i18n="nav.privacy">プライバシー</a>
+        <a href="app.html#privacy" data-i18n="nav.env">動作環境</a>
+        <a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener" data-i18n="nav.source">ソースコード</a>
       </nav>
     </div>
-    <p style="margin:10px 0 0">動画は一切外部公開されません。記録はこのブラウザの中にだけ保存されます。</p>
+    <p style="margin:10px 0 0" data-i18n="footer.line">動画は一切外部公開されません。記録はこのブラウザの中にだけ保存されます。</p>
   </footer>
 </div>
-<script src="top.js"></script>
+<script type="module" src="top.js"></script>
 </body>
 </html>

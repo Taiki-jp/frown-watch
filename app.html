@@ -68,8 +68,8 @@ button:disabled{opacity:.4;cursor:default}
 
 /* ---- 推移 ---- */
 .chart{display:flex;gap:6px;align-items:stretch;height:170px;margin:8px 0 4px}
-.chart.empty{position:relative}
-.chart.empty::before{content:"見守りを始めると、ここに日ごとの回数が並びます";position:absolute;inset:0 0 30px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+.chart{position:relative}
+.chart-empty{position:absolute;inset:0 0 30px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
 .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0}
 .bar-track{flex:1;width:100%;display:flex;align-items:flex-end}
 .bar{width:100%;background:#f2c9c9;border-radius:4px 4px 0 0;min-height:2px}
@@ -125,7 +125,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:16px 0 0}
 .stage.alert .alert-label{color:#ffd6d6}
 .meters{display:flex;flex-direction:column;gap:3px;margin-top:4px}
 .meter{display:flex;align-items:center;gap:6px;font-size:11px;color:#fff;text-shadow:0 1px 2px #000}
-.meter .m-label{width:4em;flex:none}
+.meter .m-label{min-width:4em;flex:none;white-space:nowrap}
 .meter .m-bar{position:relative;flex:1;height:6px;background:rgba(255,255,255,.2);border-radius:3px}
 .meter .m-fill{height:100%;width:0;background:#3ddc84;border-radius:3px;transition:width .1s linear}
 .meter.over .m-fill{background:var(--alert)}
@@ -164,81 +164,89 @@ button.done:disabled{opacity:1}
 .footer-links{display:flex;gap:16px}
 .footer-links a{color:var(--muted);text-decoration:none}
 .footer-links a:hover{color:var(--accent-dark);text-decoration:underline}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.lang{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-size:12px;background:#fff}
+.lang button{border:0;border-radius:0;padding:4px 10px;background:#fff;color:var(--muted);font-weight:600;font-size:12px}
+.lang button.on{background:var(--fg);color:#fff}
+em{font-style:normal}
 </style>
 </head>
 <body>
 <div class="app">
   <header class="topbar">
-    <a class="brand" href="./" title="トップページへ"><span class="logo"></span>Frown Watch</a>
-    <div id="statusPill" class="pill">停止中</div>
+    <a class="brand" href="./" data-i18n-title="brand.home"><span class="logo"></span>Frown Watch</a>
+    <div class="topbar-right">
+      <div class="lang" id="lang"><button data-lang="ja">日本語</button><button data-lang="en">EN</button></div>
+      <div id="statusPill" class="pill">停止中</div>
+    </div>
   </header>
 
   <!-- ---- セットアップ（初回） ---- -->
   <section id="onboarding" hidden>
     <ol class="stepper" id="stepper">
-      <li data-step="1"><span>1</span>はじめに</li>
-      <li data-step="2"><span>2</span>カメラ</li>
-      <li data-step="3"><span>3</span>基準</li>
-      <li data-step="4"><span>4</span>通知方法</li>
-      <li data-step="5"><span>5</span>小窓</li>
+      <li data-step="1"><span>1</span><em data-i18n="ob.s1">はじめに</em></li>
+      <li data-step="2"><span>2</span><em data-i18n="ob.s2">カメラ</em></li>
+      <li data-step="3"><span>3</span><em data-i18n="ob.s3">基準</em></li>
+      <li data-step="4"><span>4</span><em data-i18n="ob.s4">通知方法</em></li>
+      <li data-step="5"><span>5</span><em data-i18n="ob.s5">小窓</em></li>
     </ol>
 
     <div class="card step" data-step="1">
-      <h1>はじめに</h1>
-      <p>動画を見ている間、内カメラで表情を見守ります。眉間に力が入ったままになると、小窓が赤くなって知らせます。</p>
+      <h1 data-i18n="ob1.title">はじめに</h1>
+      <p data-i18n="ob1.lead">動画を見ている間、内カメラで表情を見守ります。眉間に力が入ったままになると、小窓が赤くなって知らせます。</p>
       <ul class="bullets">
-        <li>動画はこの PC の中だけで処理し、一切外部公開されません</li>
-        <li>保存するのは「何回」「何秒」という数字だけです</li>
+        <li data-i18n="ob1.b1">動画はこの PC の中だけで処理し、一切外部公開されません</li>
+        <li data-i18n="ob1.b2">保存するのは「何回」「何秒」という数字だけです</li>
       </ul>
-      <div class="actions" style="margin-top:4px"><button id="envCheckBtn">動作環境を確認する</button></div>
+      <div class="actions" style="margin-top:4px"><button id="envCheckBtn" data-i18n="env.check">動作環境を確認する</button></div>
       <div id="envResult" class="env" hidden></div>
-      <div class="actions"><button class="primary" data-next>はじめる</button></div>
+      <div class="actions"><button class="primary" data-next data-i18n="cta.start">はじめる</button></div>
     </div>
 
     <div class="card step" data-step="2" hidden>
-      <h2>カメラを許可してください</h2>
-      <p>内カメラの映像をこの画面に映します。ブラウザの許可ダイアログで「許可」を選んでください。</p>
+      <h2 data-i18n="ob2.title">カメラを許可してください</h2>
+      <p data-i18n="ob2.lead">内カメラの映像をこの画面に映します。ブラウザの許可ダイアログで「許可」を選んでください。</p>
       <div id="obStageHost" class="stage-host"></div>
       <p id="obCameraStatus" class="status"></p>
       <div class="actions">
         <button id="obCamera" class="primary">カメラを許可する</button>
-        <button id="obCameraNext" data-next disabled>次へ</button>
+        <button id="obCameraNext" data-next disabled data-i18n="common.next">次へ</button>
       </div>
     </div>
 
     <div class="card step" data-step="3" hidden>
-      <h2>無表情の基準を取ります</h2>
-      <p>正面を向いて、力を抜いた顔で 3 秒間そのままにしてください。この顔を「0」として、そこからの変化を見ます。明るい場所のほうが安定します。</p>
+      <h2 data-i18n="ob3.title">無表情の基準を取ります</h2>
+      <p data-i18n="ob3.lead">正面を向いて、力を抜いた顔で 3 秒間そのままにしてください。この顔を「0」として、そこからの変化を見ます。明るい場所のほうが安定します。</p>
       <div id="obCalibStageHost" class="stage-host"></div>
       <div class="calib-row"><div class="progress"><div id="calibBar"></div></div><div id="calibCount" class="calib-count" hidden>3</div></div>
-      <div id="calibDone" class="calib-done" hidden><span class="mark">✓</span>基準を取りました</div>
+      <div id="calibDone" class="calib-done" hidden><span class="mark">✓</span><em data-i18n="ob3.done">基準を取りました</em></div>
       <p id="obCalibStatus" class="status"></p>
       <div class="actions">
         <button id="obCalib" class="primary">基準を取る</button>
-        <button id="obCalibNext" data-next disabled>次へ</button>
+        <button id="obCalibNext" data-next disabled data-i18n="common.next">次へ</button>
       </div>
     </div>
 
     <div class="card step" data-step="4" hidden>
-      <h2>通知方法</h2>
-      <p>癖が続くと、小窓の枠が赤く点滅します。加えて、音と通知を使うか選べます。鳴りすぎないよう、音と通知は間隔をあけて出します。</p>
+      <h2 data-i18n="ob4.title">通知方法</h2>
+      <p data-i18n="ob4.lead">癖が続くと、小窓の枠が赤く点滅します。加えて、音と通知を使うか選べます。鳴りすぎないよう、音と通知は間隔をあけて出します。</p>
       <div class="toggles">
-        <label class="toggle"><input type="checkbox" class="optSound"><span></span>音で知らせる</label>
-        <label class="toggle"><input type="checkbox" class="optNotify"><span></span>通知で知らせる</label>
+        <label class="toggle"><input type="checkbox" class="optSound"><span></span><em data-i18n="opt.sound">音で知らせる</em></label>
+        <label class="toggle"><input type="checkbox" class="optNotify"><span></span><em data-i18n="opt.notify">通知で知らせる</em></label>
       </div>
       <div class="actions">
-        <button class="btnTest">試しに鳴らす</button>
-        <button class="primary" data-next>次へ</button>
+        <button class="btnTest" data-i18n="opt.test">試しに鳴らす</button>
+        <button class="primary" data-next data-i18n="common.next">次へ</button>
       </div>
     </div>
 
     <div class="card step" data-step="5" hidden>
-      <h2>小窓を出して、動画を見に行きましょう</h2>
-      <p>小窓はほかのアプリやタブの上にも残ります。小窓を出したまま YouTube などを見てください。このタブは閉じないでください。</p>
+      <h2 data-i18n="ob5.title">小窓を出して、動画を見に行きましょう</h2>
+      <p data-i18n="ob5.lead">小窓はほかのアプリやタブの上にも残ります。小窓を出したまま YouTube などを見てください。このタブは閉じないでください。</p>
       <p id="obPipNote" class="notice" hidden></p>
       <div class="actions">
-        <button id="obPip" class="primary">小窓にして始める</button>
-        <button id="obFinish">小窓なしで始める</button>
+        <button id="obPip" class="primary" data-i18n="ob5.pip">小窓にして始める</button>
+        <button id="obFinish" data-i18n="ob5.nopipStart">小窓なしで始める</button>
       </div>
     </div>
   </section>
@@ -247,9 +255,9 @@ button.done:disabled{opacity:1}
   <main id="main" hidden>
     <section class="card">
       <div class="hero-row">
-        <div class="stat big"><div class="num" id="todayCount">0</div><div class="label">今日の回数</div></div>
-        <div class="stat"><div class="num" id="todayRate">–</div><div class="label">1 時間あたり</div></div>
-        <div class="stat"><div class="num" id="todayMinutes">0</div><div class="label">見守った分</div></div>
+        <div class="stat big"><div class="num" id="todayCount">0</div><div class="label" data-i18n="hero.count">今日の回数</div></div>
+        <div class="stat"><div class="num" id="todayRate">–</div><div class="label" data-i18n="hero.rate">1 時間あたり</div></div>
+        <div class="stat"><div class="num" id="todayMinutes">0</div><div class="label" data-i18n="hero.minutes">見守った分</div></div>
       </div>
       <p id="todayBreakdown" class="muted" style="margin:10px 0 0"></p>
       <p id="trend" class="trend na"></p>
@@ -266,59 +274,59 @@ button.done:disabled{opacity:1}
     </section>
 
     <section class="card">
-      <h2>14 日の推移</h2>
-      <p class="muted">1 日の回数。棒の下は見守った分数です。</p>
+      <h2 data-i18n="chart.title">14 日の推移</h2>
+      <p class="muted" data-i18n="chart.note">1 日の回数。棒の下は見守った分数です。</p>
       <div id="chart" class="chart"></div>
-      <details class="sub"><summary>日ごとの数字</summary><table id="history"></table></details>
+      <details class="sub"><summary data-i18n="chart.daily">日ごとの数字</summary><table id="history"></table></details>
     </section>
 
     <details class="card">
-      <summary>設定</summary>
-      <div class="field"><div class="field-label">見守る癖</div><div id="habitChips" class="chips"></div></div>
+      <summary data-i18n="settings.title">設定</summary>
+      <div class="field"><div class="field-label" data-i18n="settings.habits">見守る癖</div><div id="habitChips" class="chips"></div></div>
       <div class="field">
-        <div class="field-label">敏感さ</div>
-        <div class="segmented" id="sensitivity"><button data-v="sensitive">敏感</button><button data-v="normal">標準</button><button data-v="relaxed">鈍感</button></div>
-        <p class="muted" style="margin-top:6px">「敏感」はわずかな力みでも知らせます。鳴りすぎると感じたら「鈍感」にしてください。</p>
+        <div class="field-label" data-i18n="settings.sensitivity">敏感さ</div>
+        <div class="segmented" id="sensitivity"><button data-v="sensitive" data-i18n="sens.sensitive">敏感</button><button data-v="normal" data-i18n="sens.normal">標準</button><button data-v="relaxed" data-i18n="sens.relaxed">鈍感</button></div>
+        <p class="muted" style="margin-top:6px" data-i18n="sens.note">「敏感」はわずかな力みでも知らせます。鳴りすぎると感じたら「鈍感」にしてください。</p>
       </div>
-      <div class="field"><div class="field-label">通知方法</div>
+      <div class="field"><div class="field-label" data-i18n="settings.notify">通知方法</div>
         <div class="toggles">
-          <label class="toggle"><input type="checkbox" class="optSound"><span></span>音で知らせる</label>
-          <label class="toggle"><input type="checkbox" class="optNotify"><span></span>通知で知らせる</label>
+          <label class="toggle"><input type="checkbox" class="optSound"><span></span><em data-i18n="opt.sound">音で知らせる</em></label>
+          <label class="toggle"><input type="checkbox" class="optNotify"><span></span><em data-i18n="opt.notify">通知で知らせる</em></label>
         </div>
-        <div class="actions" style="margin-top:0"><label>音と通知の間隔 <select id="cooldownSel"><option value="30">30 秒</option><option value="60">1 分</option><option value="180">3 分</option><option value="300">5 分</option></select></label><button class="btnTest">試しに鳴らす</button></div>
+        <div class="actions" style="margin-top:0"><label><em data-i18n="settings.interval">音と通知の間隔</em> <select id="cooldownSel"><option value="30" data-i18n="interval.30">30 秒</option><option value="60" data-i18n="interval.60">1 分</option><option value="180" data-i18n="interval.180">3 分</option><option value="300" data-i18n="interval.300">5 分</option></select></label><button class="btnTest" data-i18n="opt.test">試しに鳴らす</button></div>
       </div>
-      <div class="field"><div class="field-label">小窓で拡大して映す部位</div><select id="focusArea"></select></div>
-      <div class="field"><div class="field-label">無表情の基準</div><p id="baselineInfo" class="muted"></p><button id="btnCalib">基準を取り直す</button></div>
-      <div class="field"><div class="field-label">データ</div><p class="muted">記録はこのブラウザの中にだけあります。表計算ソフトに持ち出したり、今日の分を消したりできます。</p><div class="actions" style="margin-top:0"><button id="btnCsv">CSV をコピー</button><button id="btnReset" class="ghost">今日の記録を消す</button></div></div>
-      <details class="sub"><summary>詳細設定（しきい値・継続・休止）</summary><table id="targets"></table><p class="muted">値は 0〜1。基準からの増分で判定します。</p></details>
-      <div class="field"><button id="btnOnboarding" class="ghost">セットアップをやり直す</button></div>
+      <div class="field"><div class="field-label" data-i18n="settings.focus">小窓で拡大して映す部位</div><select id="focusArea"></select></div>
+      <div class="field"><div class="field-label" data-i18n="settings.baseline">無表情の基準</div><p id="baselineInfo" class="muted"></p><button id="btnCalib" data-i18n="btn.recalib">基準を取り直す</button></div>
+      <div class="field"><div class="field-label" data-i18n="settings.data">データ</div><p class="muted" data-i18n="settings.dataNote">記録はこのブラウザの中にだけあります。表計算ソフトに持ち出したり、今日の分を消したりできます。</p><div class="actions" style="margin-top:0"><button id="btnCsv" data-i18n="btn.csv">CSV をコピー</button><button id="btnReset" class="ghost" data-i18n="btn.reset">今日の記録を消す</button></div></div>
+      <details class="sub"><summary data-i18n="settings.advanced">詳細設定（しきい値・継続・休止）</summary><table id="targets"></table><p class="muted" data-i18n="settings.advancedNote">値は 0〜1。基準からの増分で判定します。</p></details>
+      <div class="field"><button id="btnOnboarding" class="ghost" data-i18n="btn.redoSetup">セットアップをやり直す</button></div>
     </details>
 
     <details class="card">
-      <summary>開発者向けの診断</summary>
-      <p class="muted">判定に使える生の値です。思いきり顰めて、どの値が動くかを見るための表です。</p>
+      <summary data-i18n="diag.title">開発者向けの診断</summary>
+      <p class="muted" data-i18n="diag.note">判定に使える生の値です。思いきり顰めて、どの値が動くかを見るための表です。</p>
       <table id="diag"></table>
     </details>
   </main>
 
   <details class="card" id="privacy">
-    <summary>プライバシーと動作環境</summary>
-    <h3>動画の扱い</h3>
+    <summary data-i18n="privacy.title2">プライバシーと動作環境</summary>
+    <h3 data-i18n="privacy.videoTitle">動画の扱い</h3>
     <ul class="bullets">
-      <li>内カメラの動画はこの PC の中だけで処理し、一切外部公開されません</li>
-      <li>保存するのは、癖が出た回数と秒数、見守った時間、無表情の基準値だけです。このブラウザの中にだけ残ります</li>
-      <li>判定に使うライブラリとモデルはこのページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
+      <li data-i18n="privacy.b1">内カメラの動画はこの PC の中だけで処理し、一切外部公開されません</li>
+      <li data-i18n="privacy.b2">保存するのは、癖が出た回数と秒数、見守った時間、無表情の基準値だけです。このブラウザの中にだけ残ります</li>
+      <li data-i18n="privacy.b3">判定に使うライブラリとモデルはこのページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
     </ul>
-    <h3>動画が外部公開されないことの確認方法</h3>
+    <h3 data-i18n="privacy.verifyTitle">動画が外部公開されないことの確認方法</h3>
     <ul class="bullets">
-      <li>開発者ツールの Network タブを開いたまま見守りを開始する。最初の読み込み以外に通信が起きません</li>
-      <li>見守りを開始したあとに Wi-Fi を切っても、そのまま動き続けます</li>
-      <li>このページの CSP で、配布元以外への通信をブラウザ自身が禁止しています。ページのソースの冒頭にある meta タグで確認できます</li>
-      <li>ビルド工程がなく、配布しているファイルがそのまま動きます。<a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener">ソースコード</a>と突き合わせられます</li>
+      <li data-i18n="verify.b1">開発者ツールの Network タブを開いたまま見守りを開始する。最初の読み込み以外に通信が起きません</li>
+      <li data-i18n="verify.b2">見守りを開始したあとに Wi-Fi を切っても、そのまま動き続けます</li>
+      <li data-i18n="verify.b3">このページの CSP で、配布元以外への通信をブラウザ自身が禁止しています。ページのソースの冒頭にある meta タグで確認できます</li>
+      <li data-i18n-html="verify.b4">ビルド工程がなく、配布しているファイルがそのまま動きます。<a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener">ソースコード</a>と突き合わせられます</li>
     </ul>
-    <h3>動作環境</h3>
-    <p class="muted">Chrome 116 以降を想定しています。小窓表示は Safari と Firefox では使えません。</p>
-    <div class="actions" style="margin-top:0"><button id="envCheckBtn2">動作環境を確認する</button></div>
+    <h3 data-i18n="env.title">動作環境</h3>
+    <p class="muted" data-i18n="env.note">Chrome 116 以降を想定しています。小窓表示は Safari と Firefox では使えません。</p>
+    <div class="actions" style="margin-top:0"><button id="envCheckBtn2" data-i18n="env.check">動作環境を確認する</button></div>
     <div id="envResult2" class="env" hidden></div>
   </details>
 
@@ -326,12 +334,12 @@ button.done:disabled{opacity:1}
     <div class="footer-row">
       <div class="footer-brand"><span class="logo"></span>Frown Watch <span id="version" class="muted"></span></div>
       <nav class="footer-links">
-        <a href="#privacy" id="linkPrivacy">プライバシー</a>
-        <a href="#privacy" id="linkEnv">動作環境</a>
-        <a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener">ソースコード</a>
+        <a href="#privacy" id="linkPrivacy" data-i18n="nav.privacy">プライバシー</a>
+        <a href="#privacy" id="linkEnv" data-i18n="nav.env">動作環境</a>
+        <a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener" data-i18n="nav.source">ソースコード</a>
       </nav>
     </div>
-    <p style="margin:10px 0 0">動画は一切外部公開されません。記録はこのブラウザの中にだけ保存されます。</p>
+    <p style="margin:10px 0 0" data-i18n="footer.line">動画は一切外部公開されません。記録はこのブラウザの中にだけ保存されます。</p>
   </footer>
 </div>
 

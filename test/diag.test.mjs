@@ -9,7 +9,8 @@ const renderSrc = slice("function renderDiag() {", "\nfunction updateAlertUI() {
 const clamp01 = x => Math.max(0, Math.min(1, x));
 const els = { diag: { innerHTML: "" } };
 let baseline = null;
-const mod = new Function("els", "clamp01", "getBaseline", geoSrc + renderSrc.replace(/baseline\?\./g, "getBaseline()?.") + "\nreturn { geoFeatures, renderDiag, pushPeak, peakOf, diag, DIAG_BLEND, textureFromPixels };")(els, clamp01, () => baseline);
+const t = (k, p) => k + (p ? " " + JSON.stringify(p) : "");
+const mod = new Function("els", "clamp01", "getBaseline", "t", geoSrc + renderSrc.replace(/baseline\?\./g, "getBaseline()?.") + "\nreturn { geoFeatures, renderDiag, pushPeak, peakOf, diag, DIAG_BLEND, textureFromPixels };")(els, clamp01, () => baseline, t);
 
 // 478 点の合成顔。使う点だけ意味のある位置に置く
 const lm = Array.from({ length: 478 }, (_, i) => ({ x: 0.5 + (i % 7) * 0.001, y: 0.5 + (i % 5) * 0.001, z: 0 }));
@@ -31,12 +32,12 @@ mod.diag.scores = { browDownLeft: 0.12, browDownRight: 0.1 }; mod.diag.geo = fro
 for (const n of mod.DIAG_BLEND) mod.pushPeak(n, 0.3, 1000);
 mod.pushPeak("geo:gap", frown.gap, 1000); mod.pushPeak("geo:drop", frown.drop, 1000);
 mod.renderDiag();
-assert.ok(els.diag.innerHTML.includes("browDownLeft") && els.diag.innerHTML.includes("基準を取ると"), "no-baseline render");
+assert.ok(els.diag.innerHTML.includes("browDownLeft") && els.diag.innerHTML.includes("diag.baseHint"), "no-baseline render");
 baseline = { geo: neutral };
 mod.renderDiag();
-assert.ok(/基準比 -\d+%/.test(els.diag.innerHTML), "with-baseline render: " + els.diag.innerHTML.slice(0, 200));
+assert.ok(/diag\.base \{"pct":"-\d+%"/.test(els.diag.innerHTML), "with-baseline render: " + els.diag.innerHTML.slice(0, 200));
 mod.diag.scores = null; mod.renderDiag();
-assert.ok(els.diag.innerHTML.includes("顔が映ると"), "no-face render");
+assert.ok(els.diag.innerHTML.includes("diag.waiting"), "no-face render");
 console.log("diag tests passed:", { neutral: { gap: +neutral.gap.toFixed(3), drop: +neutral.drop.toFixed(3) }, frown: { gap: +frown.gap.toFixed(3), drop: +frown.drop.toFixed(3) } });
 
 // 画素ベースのしわの手がかり: 平坦な画像では輪郭がほぼ 0、縦線があれば縦線の割合が高く、横線なら低い

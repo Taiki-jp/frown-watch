@@ -1,26 +1,30 @@
 import { FaceLandmarker, FilesetResolver } from "./vendor/mediapipe/vision_bundle.mjs";
+import { LANGS, getLang, setLang, makeT, applyStatic } from "./i18n.js";
 
 const MP_WASM = "./vendor/mediapipe/wasm";
 const MODEL_URL = "./vendor/models/face_landmarker.task";
 const PROCESS_INTERVAL_MS = 100; // 約 10fps
 const CALIB_MS = 3000;
-const APP_VERSION = "0.2.0";
+const APP_VERSION = "0.3.0";
+
+let lang = getLang();
+let t = makeT(lang);
 
 /*PURE-START*/
 const avg = (...xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const clamp01 = x => Math.max(0, Math.min(1, x));
 
-// 見守る癖。score は blendshape の値を返す関数 v(name) から癖の強さ（0〜1）を作る
+// 見守る癖。score は blendshape の値を返す関数 v(name) から癖の強さ（0〜1）を作る。表示名は辞書の habit.<key>
 const TARGETS = {
-  glabella: { label: "眉間", desc: "眉を寄せる・下げる", defaults: { on: true, threshold: 0.30, duration: 2, cooldown: 60 },
+  glabella: { defaults: { on: true, threshold: 0.30, duration: 2, cooldown: 60 },
     score: v => avg(v("browDownLeft"), v("browDownRight")) },
-  forehead: { label: "額", desc: "眉を上げて額にしわが寄る", defaults: { on: true, threshold: 0.35, duration: 2, cooldown: 60 },
+  forehead: { defaults: { on: true, threshold: 0.35, duration: 2, cooldown: 60 },
     score: v => Math.max(v("browInnerUp"), avg(v("browOuterUpLeft"), v("browOuterUpRight"))) },
-  squint: { label: "目元", desc: "目を細める。笑顔のときは数えない", defaults: { on: true, threshold: 0.35, duration: 2, cooldown: 60 },
+  squint: { defaults: { on: true, threshold: 0.20, duration: 2, cooldown: 60 },
     score: v => avg(v("mouthSmileLeft"), v("mouthSmileRight")) > 0.4 ? 0 : avg(v("eyeSquintLeft"), v("eyeSquintRight")) },
-  mouth: { label: "口角", desc: "口角が下がる", defaults: { on: true, threshold: 0.30, duration: 3, cooldown: 60 },
+  mouth: { defaults: { on: true, threshold: 0.30, duration: 3, cooldown: 60 },
     score: v => avg(v("mouthFrownLeft"), v("mouthFrownRight")) },
-  jaw: { label: "口が開く", desc: "口がぽかんと開いたまま", defaults: { on: true, threshold: 0.25, duration: 5, cooldown: 60 },
+  jaw: { defaults: { on: true, threshold: 0.25, duration: 5, cooldown: 60 },
     score: v => v("jawOpen") },
 };
 
@@ -48,17 +52,19 @@ function stepTarget(st, score, now, dt, cfg) {
   return out;
 }
 /*PURE-END*/
+const habitLabel = k => t("habit." + k);
+const habitDesc = k => t("habit." + k + ".desc");
 
-// 拡大して映す部位。MediaPipe Face Landmarker の landmark 番号で囲む範囲を決める
+// 拡大して映す部位。MediaPipe Face Landmarker の landmark 番号で囲む範囲を決める。表示名は辞書の roi.<key>
 // 左右は鏡に映った自分から見た向き（右＝画面の右側）
 const ROIS = {
-  glabella: { label: "眉間", idx: [107, 55, 193, 336, 285, 417, 9, 8, 168, 151, 66, 296], pad: 0.6 },
-  forehead: { label: "額", idx: [10, 109, 338, 67, 297, 103, 332, 105, 334, 66, 296, 107, 336], pad: 0.3 },
-  eyeR: { label: "目尻（右）", idx: [33, 130, 226, 113, 247, 143, 35, 124, 156, 7, 25, 110, 31, 111], pad: 0.6 },
-  eyeL: { label: "目尻（左）", idx: [263, 359, 446, 342, 467, 372, 265, 353, 383, 249, 255, 339, 261, 340], pad: 0.6 },
-  nasoR: { label: "ほうれい線（右）", idx: [98, 205, 61, 206, 203, 216, 212, 207, 187, 50, 92, 165, 186, 185, 40], pad: 0.4 },
-  nasoL: { label: "ほうれい線（左）", idx: [327, 425, 291, 426, 423, 436, 432, 427, 411, 280, 322, 391, 410, 409, 270], pad: 0.4 },
-  mouth: { label: "口元", idx: [61, 291, 0, 17, 37, 267, 84, 314, 40, 270, 91, 321], pad: 0.5 },
+  glabella: { idx: [107, 55, 193, 336, 285, 417, 9, 8, 168, 151, 66, 296], pad: 0.6 },
+  forehead: { idx: [10, 109, 338, 67, 297, 103, 332, 105, 334, 66, 296, 107, 336], pad: 0.3 },
+  eyeR: { idx: [33, 130, 226, 113, 247, 143, 35, 124, 156, 7, 25, 110, 31, 111], pad: 0.6 },
+  eyeL: { idx: [263, 359, 446, 342, 467, 372, 265, 353, 383, 249, 255, 339, 261, 340], pad: 0.6 },
+  nasoR: { idx: [98, 205, 61, 206, 203, 216, 212, 207, 187, 50, 92, 165, 186, 185, 40], pad: 0.4 },
+  nasoL: { idx: [327, 425, 291, 426, 423, 436, 432, 427, 411, 280, 322, 391, 410, 409, 270], pad: 0.4 },
+  mouth: { idx: [61, 291, 0, 17, 37, 267, 84, 314, 40, 270, 91, 321], pad: 0.5 },
 };
 
 // ---------- 診断用の幾何特徴 ----------
@@ -121,7 +127,7 @@ function textureScore(lm, vw, vh) {
   texCtx.drawImage(els.video, bx.sx, bx.sy, bx.sw, bx.sh, 0, 0, TEX_W, TEX_H);
   return textureFromPixels(texCtx.getImageData(0, 0, TEX_W, TEX_H).data, TEX_W, TEX_H);
 }
-const lumaNote = l => l < 50 ? "暗い。判定が不安定になります" : l < 90 ? "やや暗い" : l > 200 ? "明るすぎる。白飛びに注意" : "十分";
+const lumaKey = l => l < 50 ? "luma.dark" : l < 90 ? "luma.dim" : l > 200 ? "luma.bright" : "luma.ok";
 
 const diag = { scores: null, geo: null, tex: null, peaks: {} }; // peaks: 名前 -> 直近 3 秒の { t, v }
 function pushPeak(name, v, now) {
@@ -140,12 +146,12 @@ const loadJSON = (k, def) => { try { const v = localStorage.getItem(k); return v
 const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 const SENSITIVITY = { sensitive: 0.7, normal: 1, relaxed: 1.4 }; // しきい値に掛ける係数
-const SETTINGS_VERSION = 2; // 2: 見守る癖を全部オンにした
+const SETTINGS_VERSION = 3; // 2: 見守る癖を全部オンにした / 3: 目元のしきい値を 0.35 から 0.20 に下げた
 const round2 = x => Math.round(x * 100) / 100;
 
 function defaultSettings() {
   const targets = {};
-  for (const [k, t] of Object.entries(TARGETS)) targets[k] = { ...t.defaults };
+  for (const [k, tg] of Object.entries(TARGETS)) targets[k] = { ...tg.defaults };
   return { version: SETTINGS_VERSION, onboarded: false, sensitivity: "normal", sound: true, notify: false, focus: "glabella", targets };
 }
 function loadSettings() {
@@ -155,6 +161,7 @@ function loadSettings() {
   const targets = {};
   for (const k of Object.keys(TARGETS)) targets[k] = { ...d.targets[k], ...(s.targets?.[k] || {}) };
   if ((s.version ?? 1) < 2) for (const k of Object.keys(TARGETS)) targets[k].on = true; // 古い設定は初期値に合わせる
+  if ((s.version ?? 1) < 3) targets.squint.threshold = round2(TARGETS.squint.defaults.threshold * (SENSITIVITY[s.sensitivity] ?? 1)); // 目元は敏感さの段階を保ったまま下げる
   return { ...d, ...s, targets, version: SETTINGS_VERSION };
 }
 const settings = loadSettings();
@@ -186,7 +193,7 @@ const dayCount = (s, keys = enabledKeys()) => keys.reduce((a, k) => a + (s.targe
 // ---------- 要素 ----------
 const $ = id => document.getElementById(id);
 const els = {};
-for (const id of ["statusPill", "onboarding", "main", "stepper", "obStageHost", "obCameraStatus", "obCamera", "obCameraNext",
+for (const id of ["statusPill", "lang", "onboarding", "main", "stepper", "obStageHost", "obCameraStatus", "obCamera", "obCameraNext",
   "obCalibStageHost", "calibBar", "calibCount", "calibDone", "countdown", "obCalibStatus", "obCalib", "obCalibNext", "obPipNote", "obPip", "obFinish",
   "envCheckBtn", "envResult", "envCheckBtn2", "envResult2", "version", "privacy", "linkPrivacy", "linkEnv", "mainStageHost",
   "stage", "video", "overlay", "inset", "insetLabel", "alertLabel", "meters", "hudStatus", "hudCount",
@@ -200,21 +207,20 @@ let landmarker = null, stream = null, running = false, pipWindow = null, current
 let loopGen = 0, lastProcess = 0, lastTick = null, lastUi = 0, lastStatsRender = 0, frameCount = 0;
 let calib = null; // { until, sums, geo, tex, n, texN }
 let audioCtx = null;
+let currentState = "off", currentMode = "idle";
+const envResults = new Map(); // 表示先の要素 -> 直近の確認結果。言語を切り替えたときに描き直す
 const states = {};
 const liveEff = {};
 const resetStates = () => { for (const k of Object.keys(TARGETS)) states[k] = newTargetState(); };
 resetStates();
 
 // ---------- 状態の表示 ----------
-const PILL = {
-  off: ["", "停止中"], loading: ["pill-warn", "準備中"], on: ["pill-on", "見守り中"], pip: ["pill-on", "小窓で見守り中"],
-  noface: ["pill-warn", "顔が見つかりません"], dark: ["pill-warn", "暗くて不安定"], calib: ["pill-warn", "基準を取得中"],
-};
+const PILL = { off: "", loading: "pill-warn", on: "pill-on", pip: "pill-on", noface: "pill-warn", dark: "pill-warn", calib: "pill-warn" };
 function setState(kind) {
-  const [cls, text] = PILL[kind];
-  els.statusPill.className = "pill " + cls;
-  els.statusPill.textContent = text;
-  els.hudStatus.textContent = kind === "pip" ? "見守り中" : text;
+  currentState = kind;
+  els.statusPill.className = "pill " + PILL[kind];
+  els.statusPill.textContent = t("state." + kind);
+  els.hudStatus.textContent = kind === "pip" ? t("state.on") : t("state." + kind);
 }
 function setStatus(msg) {
   els.status.textContent = msg;
@@ -233,28 +239,29 @@ function mountStage(host) {
 }
 function updatePlaceholder() {
   for (const ph of document.querySelectorAll(".stage-placeholder")) ph.remove();
-  if (pipWindow && currentHost) currentHost.insertAdjacentHTML("beforeend", `<div class="stage-placeholder">映像は小窓に表示しています</div>`);
+  if (pipWindow && currentHost) currentHost.insertAdjacentHTML("beforeend", `<div class="stage-placeholder">${t("stage.placeholder")}</div>`);
 }
 // セットアップのカメラ許可ボタン。許可できたらチェック印にして押せなくする
 function setCameraButton(done, loading = false) {
   els.obCamera.disabled = done || loading;
   els.obCamera.classList.toggle("done", done);
-  els.obCamera.textContent = done ? "✓ 許可されました" : loading ? "起動中…" : "カメラを許可する";
+  els.obCamera.textContent = done ? t("ob2.allowed") : loading ? t("ob2.starting") : t("ob2.allow");
 }
 
 // ---------- 設定の UI ----------
 function buildTargetTable() {
-  const rows = Object.entries(TARGETS).map(([k, t]) => {
+  const rows = Object.entries(TARGETS).map(([k]) => {
     const c = settings.targets[k];
     return `<tr data-key="${k}">
-      <td><label class="chk"><input type="checkbox" data-f="on" ${c.on ? "checked" : ""}> <b>${t.label}</b></label><br><small class="k">${t.desc}</small></td>
+      <td><label class="chk"><input type="checkbox" data-f="on" ${c.on ? "checked" : ""}> <b>${habitLabel(k)}</b></label><br><small class="k">${habitDesc(k)}</small></td>
       <td class="num"><span class="live" data-live="${k}">–</span></td>
       <td><input type="range" data-f="threshold" min="0.05" max="0.9" step="0.05" value="${c.threshold}"> <span data-v="threshold">${c.threshold.toFixed(2)}</span></td>
-      <td><input type="number" data-f="duration" min="0.5" max="60" step="0.5" value="${c.duration}"> 秒</td>
-      <td><input type="number" data-f="cooldown" min="0" max="900" step="5" value="${c.cooldown}"> 秒</td>
+      <td><input type="number" data-f="duration" min="0.5" max="60" step="0.5" value="${c.duration}"> ${t("unit.sec")}</td>
+      <td><input type="number" data-f="cooldown" min="0" max="900" step="5" value="${c.cooldown}"> ${t("unit.sec")}</td>
     </tr>`;
   }).join("");
-  els.targets.innerHTML = `<thead><tr><th>癖</th><th class="num">今の値</th><th>しきい値</th><th>継続</th><th>休止</th></tr></thead><tbody>${rows}</tbody>`;
+  els.targets.innerHTML = `<thead><tr><th>${t("tbl.habit")}</th><th class="num">${t("tbl.now")}</th><th>${t("tbl.threshold")}</th><th>${t("tbl.duration")}</th><th>${t("tbl.cooldown")}</th></tr></thead><tbody>${rows}</tbody>`;
+  updateLiveValues();
 }
 els.targets.addEventListener("input", e => {
   const tr = e.target.closest("tr"); const f = e.target.dataset.f;
@@ -269,8 +276,8 @@ els.targets.addEventListener("input", e => {
 });
 
 function buildMeters() {
-  els.meters.innerHTML = Object.entries(TARGETS).filter(([k]) => settings.targets[k].on).map(([k, t]) =>
-    `<div class="meter" data-key="${k}"><span class="m-label">${t.label}</span><div class="m-bar"><div class="m-fill"></div><div class="m-th" style="left:${settings.targets[k].threshold * 100}%"></div></div></div>`
+  els.meters.innerHTML = Object.keys(TARGETS).filter(k => settings.targets[k].on).map(k =>
+    `<div class="meter" data-key="${k}"><span class="m-label">${habitLabel(k)}</span><div class="m-bar"><div class="m-fill"></div><div class="m-th" style="left:${settings.targets[k].threshold * 100}%"></div></div></div>`
   ).join("");
 }
 function updateMeters() {
@@ -282,16 +289,16 @@ function updateMeters() {
 }
 
 function buildFocusSelect() {
-  els.focusArea.innerHTML = `<option value="none">なし</option>` + Object.entries(ROIS).map(([k, r]) => `<option value="${k}">${r.label}</option>`).join("");
   if (!(settings.focus in ROIS) && settings.focus !== "none") settings.focus = "none";
+  els.focusArea.innerHTML = `<option value="none">${t("roi.none")}</option>` + Object.keys(ROIS).map(k => `<option value="${k}">${t("roi." + k)}</option>`).join("");
   els.focusArea.value = settings.focus;
-  els.focusArea.addEventListener("change", () => { settings.focus = els.focusArea.value; saveSettings(); applyFocus(); });
   applyFocus();
 }
+els.focusArea.addEventListener("change", () => { settings.focus = els.focusArea.value; saveSettings(); applyFocus(); });
 function applyFocus() {
   const roi = ROIS[settings.focus];
   els.stage.classList.toggle("has-inset", !!roi);
-  els.insetLabel.textContent = roi ? roi.label : "";
+  els.insetLabel.textContent = roi ? t("roi." + settings.focus) : "";
 }
 
 // しきい値が「敏感・標準・鈍感」のどれに当たるか。手で変えてあればどれでもない
@@ -309,22 +316,23 @@ function applySensitivity(name) {
 
 // 設定の表示をまとめて更新する。チップ、敏感さ、間隔、トグル、基準
 function renderSettings() {
-  els.habitChips.innerHTML = Object.entries(TARGETS).map(([k, t]) =>
-    `<button class="chip ${settings.targets[k].on ? "on" : ""}" data-k="${k}" title="${t.desc}">${t.label}</button>`).join("");
+  els.habitChips.innerHTML = Object.keys(TARGETS).map(k =>
+    `<button class="chip ${settings.targets[k].on ? "on" : ""}" data-k="${k}" title="${habitDesc(k)}">${habitLabel(k)}</button>`).join("");
   const sens = detectSensitivity();
   for (const b of els.sensitivity.querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === sens);
   const cds = Object.keys(TARGETS).map(k => settings.targets[k].cooldown);
   const same = cds.every(c => c === cds[0]);
   const custom = els.cooldownSel.querySelector('option[value="custom"]');
   if (same && [...els.cooldownSel.options].some(o => o.value === String(cds[0]))) { custom?.remove(); els.cooldownSel.value = String(cds[0]); }
-  else { if (!custom) els.cooldownSel.insertAdjacentHTML("beforeend", `<option value="custom">個別</option>`); els.cooldownSel.value = "custom"; }
+  else { if (!custom) els.cooldownSel.insertAdjacentHTML("beforeend", `<option value="custom">${t("interval.custom")}</option>`); els.cooldownSel.value = "custom"; }
   for (const el of all(".optSound")) el.checked = settings.sound;
   for (const el of all(".optNotify")) el.checked = settings.notify;
-  if (!baseline) els.baselineInfo.textContent = "未取得。無表情のときの値を 0 として判定しています";
+  if (!baseline) els.baselineInfo.textContent = t("baseline.none");
   else {
     const when = new Date(baseline.at);
-    const parts = Object.keys(TARGETS).map(k => `${TARGETS[k].label} ${(baseline.values[k] ?? 0).toFixed(2)}`).join(" / ");
-    els.baselineInfo.textContent = `${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")} に取得。${parts}${baseline.geo ? ` / 眉頭の間隔 ${baseline.geo.gap.toFixed(3)} / 眉頭の高さ ${baseline.geo.drop.toFixed(3)}` : ""}`;
+    const date = `${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
+    const parts = Object.keys(TARGETS).map(k => `${habitLabel(k)} ${(baseline.values[k] ?? 0).toFixed(2)}`).join(" / ");
+    els.baselineInfo.textContent = t("baseline.at", { date, parts }) + (baseline.geo ? t("baseline.geo", { gap: baseline.geo.gap.toFixed(3), drop: baseline.geo.drop.toFixed(3) }) : "");
   }
 }
 els.habitChips.addEventListener("click", e => {
@@ -350,12 +358,13 @@ function trendText() {
   const days = lastDays(14);
   const prev = days.slice(0, 7).map(dk => rateOf(stats[dk])).filter(v => v != null);
   const cur = days.slice(7).map(dk => rateOf(stats[dk])).filter(v => v != null);
-  if (cur.length < 2 || prev.length < 2) return { cls: "na", text: "記録が溜まると、先週との比較が出ます。1 日 5 分以上の見守りが 2 日ずつ必要です。" };
+  if (cur.length < 2 || prev.length < 2) return { cls: "na", text: t("trend.na") };
   const a = avg(...cur), b = avg(...prev);
-  if (b === 0) return { cls: "na", text: `先週は 0 回でした。今週は 1 時間あたり ${a.toFixed(1)} 回です。` };
+  const rate = a.toFixed(1);
+  if (b === 0) return { cls: "na", text: t("trend.lastZero", { rate }) };
   const diff = (a / b - 1) * 100;
-  if (Math.abs(diff) < 5) return { cls: "na", text: `先週と同じくらいです。1 時間あたり ${a.toFixed(1)} 回。` };
-  return { cls: diff < 0 ? "down" : "up", text: `先週より ${Math.abs(diff).toFixed(0)}% ${diff < 0 ? "少ない" : "多い"}。1 時間あたり ${a.toFixed(1)} 回。` };
+  if (Math.abs(diff) < 5) return { cls: "na", text: t("trend.same", { rate }) };
+  return { cls: diff < 0 ? "down" : "up", text: t(diff < 0 ? "trend.less" : "trend.more", { pct: Math.abs(diff).toFixed(0), rate }) };
 }
 function renderStats() {
   const day = todayStats();
@@ -366,25 +375,25 @@ function renderStats() {
   els.todayRate.textContent = day.faceSec >= 300 ? (count / hours).toFixed(1) : "–";
   els.todayMinutes.textContent = Math.round(day.faceSec / 60);
   els.todayBreakdown.textContent = keys.length
-    ? keys.map(k => `${TARGETS[k].label} ${day.targets[k].count} 回 ${Math.round(day.targets[k].sec)} 秒`).join(" ・ ")
-    : "見守る癖が選ばれていません。設定で選んでください";
+    ? keys.map(k => t("stats.item", { label: habitLabel(k), count: day.targets[k].count, sec: Math.round(day.targets[k].sec) })).join(" ・ ")
+    : t("stats.noHabits");
   const tr = trendText();
   els.trend.className = "trend " + tr.cls; els.trend.textContent = tr.text;
 
   const days = lastDays(14);
   const vals = days.map(dk => stats[dk] ? dayCount(stats[dk], keys) : null);
   const max = Math.max(1, ...vals.filter(v => v != null));
-  els.chart.classList.toggle("empty", vals.every(v => v == null));
-  els.chart.innerHTML = days.map((dk, i) => {
+  const empty = vals.every(v => v == null);
+  els.chart.innerHTML = (empty ? `<div class="chart-empty">${t("chart.empty")}</div>` : "") + days.map((dk, i) => {
     const v = vals[i]; const d = parseKey(dk);
     const mins = stats[dk] ? Math.round(stats[dk].faceSec / 60) : 0;
     const label = (i % 2 === 1) ? `${d.getMonth() + 1}/${d.getDate()}` : "";
     const h = v == null ? 0 : Math.max(2, v / max * 100);
-    return `<div class="bar-col" title="${dk}: ${v ?? 0} 回、${mins} 分"><div class="bar-track"><div class="bar ${i === 13 ? "today" : ""} ${v == null ? "empty" : ""}" style="height:${h}%"></div></div><div class="bar-val">${v == null ? "" : (mins ? mins + "分" : "")}</div><div class="bar-label">${label}</div></div>`;
+    return `<div class="bar-col" title="${t("chart.tip", { date: dk, count: v ?? 0, mins })}"><div class="bar-track"><div class="bar ${i === 13 ? "today" : ""} ${v == null ? "empty" : ""}" style="height:${h}%"></div></div><div class="bar-val">${v == null || !mins ? "" : t("chart.min", { mins })}</div><div class="bar-label">${label}</div></div>`;
   }).join("");
 
   const allKeys = Object.keys(TARGETS);
-  els.history.innerHTML = `<thead><tr><th>日付</th>${allKeys.map(k => `<th class="num">${TARGETS[k].label}</th>`).join("")}<th class="num">見守り分</th><th class="num">1 時間あたり</th></tr></thead><tbody>` +
+  els.history.innerHTML = `<thead><tr><th>${t("hist.date")}</th>${allKeys.map(k => `<th class="num">${habitLabel(k)}</th>`).join("")}<th class="num">${t("hist.minutes")}</th><th class="num">${t("hist.rate")}</th></tr></thead><tbody>` +
     [...days].reverse().map(dk => {
       const s = stats[dk]; if (!s) return "";
       const r = rateOf(s);
@@ -400,7 +409,7 @@ function updateLiveValues() {
 }
 
 function renderDiag() {
-  if (!diag.scores || !diag.geo) { els.diag.innerHTML = `<tbody><tr><td class="muted">見守りを開始して顔が映ると表示します</td></tr></tbody>`; return; }
+  if (!diag.scores || !diag.geo) { els.diag.innerHTML = `<tbody><tr><td class="muted">${t("diag.waiting")}</td></tr></tbody>`; return; }
   const pct = x => `${x >= 0 ? "+" : ""}${x.toFixed(0)}%`;
   const bsRows = DIAG_BLEND.map(n => {
     const v = diag.scores[n] ?? 0; const pk = peakOf(n) ?? v;
@@ -408,29 +417,29 @@ function renderDiag() {
   }).join("");
   const geoRow = (key, label) => {
     const v = diag.geo[key]; const base = baseline?.geo?.[key]; const pk = peakOf("geo:" + key, Math.min);
-    const note = base ? `基準比 ${pct((v / base - 1) * 100)}。3 秒内の最小は ${pct((pk / base - 1) * 100)}` : '<small class="k">基準を取ると変化率を出します</small>';
+    const note = base ? t("diag.base", { pct: pct((v / base - 1) * 100), pk: pct((pk / base - 1) * 100) }) : `<small class="k">${t("diag.baseHint")}</small>`;
     return `<tr><td>${label}</td><td class="num">${v.toFixed(3)}</td><td class="num">${pk == null ? "–" : pk.toFixed(3)}</td><td>${note}</td></tr>`;
   };
   let texRows = "";
   if (diag.tex) {
-    const t = diag.tex, bt = baseline?.tex;
-    const pkE = peakOf("tex:energy") ?? t.energy, pkV = peakOf("tex:vertical") ?? t.vertical;
-    texRows = `<tr><td>明るさ（眉間の皮膚の平均輝度）</td><td class="num">${t.luma.toFixed(0)}</td><td class="num">/ 255</td><td>${lumaNote(t.luma)}</td></tr>` +
-      `<tr><td>輪郭の強さ</td><td class="num">${t.energy.toFixed(2)}</td><td class="num">${pkE.toFixed(2)}</td><td>${bt ? `基準比 ${pct((t.energy / bt.energy - 1) * 100)}。3 秒内の最大は ${pct((pkE / bt.energy - 1) * 100)}` : '<small class="k">基準を取ると変化率を出します</small>'}</td></tr>` +
-      `<tr><td>縦線の割合</td><td class="num">${t.vertical.toFixed(2)}</td><td class="num">${pkV.toFixed(2)}</td><td>${bt ? `基準との差 ${(t.vertical - bt.vertical >= 0 ? "+" : "")}${(t.vertical - bt.vertical).toFixed(2)}` : ""}</td></tr>`;
+    const tx = diag.tex, bt = baseline?.tex;
+    const pkE = peakOf("tex:energy") ?? tx.energy, pkV = peakOf("tex:vertical") ?? tx.vertical;
+    texRows = `<tr><td>${t("diag.luma")}</td><td class="num">${tx.luma.toFixed(0)}</td><td class="num">/ 255</td><td>${t(lumaKey(tx.luma))}</td></tr>` +
+      `<tr><td>${t("diag.energy")}</td><td class="num">${tx.energy.toFixed(2)}</td><td class="num">${pkE.toFixed(2)}</td><td>${bt ? t("diag.energyBase", { pct: pct((tx.energy / bt.energy - 1) * 100), pk: pct((pkE / bt.energy - 1) * 100) }) : `<small class="k">${t("diag.baseHint")}</small>`}</td></tr>` +
+      `<tr><td>${t("diag.vertical")}</td><td class="num">${tx.vertical.toFixed(2)}</td><td class="num">${pkV.toFixed(2)}</td><td>${bt ? t("diag.verticalDiff", { d: `${tx.vertical - bt.vertical >= 0 ? "+" : ""}${(tx.vertical - bt.vertical).toFixed(2)}` }) : ""}</td></tr>`;
   }
-  els.diag.innerHTML = `<thead><tr><th>blendshape</th><th class="num">今</th><th class="num">3 秒内の最大</th><th></th></tr></thead><tbody>${bsRows}</tbody>` +
-    `<thead><tr><th>landmark の距離比</th><th class="num">今</th><th class="num">3 秒内の最小</th><th></th></tr></thead><tbody>${geoRow("gap", "眉頭の間隔 ÷ 目尻間")}${geoRow("drop", "眉頭の高さ ÷ 目から鼻下")}</tbody>` +
-    `<thead><tr><th>眉間の皮膚の画素</th><th class="num">今</th><th class="num">3 秒内の最大</th><th></th></tr></thead><tbody>${texRows}</tbody>`;
+  els.diag.innerHTML = `<thead><tr><th>${t("diag.blend")}</th><th class="num">${t("diag.now")}</th><th class="num">${t("diag.max3")}</th><th></th></tr></thead><tbody>${bsRows}</tbody>` +
+    `<thead><tr><th>${t("diag.geo")}</th><th class="num">${t("diag.now")}</th><th class="num">${t("diag.min3")}</th><th></th></tr></thead><tbody>${geoRow("gap", t("diag.gap"))}${geoRow("drop", t("diag.drop"))}</tbody>` +
+    `<thead><tr><th>${t("diag.pixels")}</th><th class="num">${t("diag.now")}</th><th class="num">${t("diag.max3")}</th><th></th></tr></thead><tbody>${texRows}</tbody>`;
 }
 
 function updateAlertUI() {
-  if (calib) { els.stage.classList.remove("alert"); els.alertLabel.textContent = "そのまま、力を抜いて…"; return; }
+  if (calib) { els.stage.classList.remove("alert"); els.alertLabel.textContent = t("alert.calib"); return; }
   const active = Object.keys(TARGETS).filter(k => settings.targets[k].on && states[k].active);
   els.stage.classList.toggle("alert", active.length > 0);
-  els.alertLabel.textContent = active.length ? active.map(k => TARGETS[k].label).join("・") + "に力が入っています" : "";
+  els.alertLabel.textContent = active.length ? t("alert.tense", { labels: active.map(habitLabel).join(lang === "ja" ? "・" : ", ") }) : "";
   const day = todayStats();
-  els.hudCount.textContent = "今日 " + enabledKeys().map(k => `${TARGETS[k].label} ${day.targets[k].count}`).join(" / ");
+  els.hudCount.textContent = t("hud.today") + " " + enabledKeys().map(k => `${habitLabel(k)} ${day.targets[k].count}`).join(" / ");
 }
 
 // ---------- 知らせる ----------
@@ -445,21 +454,20 @@ function playChime() {
   const t0 = audioCtx.currentTime;
   [880, 660].forEach((f, i) => {
     const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-    const t = t0 + i * 0.18;
+    const at = t0 + i * 0.18;
     o.type = "sine"; o.frequency.value = f;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.28);
     o.connect(g).connect(audioCtx.destination);
-    o.start(t); o.stop(t + 0.3);
+    o.start(at); o.stop(at + 0.3);
   });
 }
 function notify(k) {
-  const t = TARGETS[k];
   if (settings.sound) { ensureAudio(); playChime(); }
   if (settings.notify && "Notification" in window && Notification.permission === "granted") {
     try {
-      const n = new Notification(`${t.label}に力が入っています`, { body: "力を抜いて、表情をゆるめましょう", tag: "frown-watch", silent: !!settings.sound });
+      const n = new Notification(t("notify.title", { label: habitLabel(k) }), { body: t("notify.body"), tag: "frown-watch", silent: !!settings.sound });
       setTimeout(() => n.close(), 5000);
     } catch (e) { console.warn("[fw] notification failed", e); }
   }
@@ -511,8 +519,8 @@ function startCalib() {
   els.calibDone.hidden = true;
   els.calibCount.hidden = false; els.calibCount.textContent = "3";
   els.countdown.hidden = false; els.countdown.textContent = "3";
-  els.obCalib.disabled = true; els.obCalib.textContent = "計測中…"; els.btnCalib.disabled = true;
-  setStatus("3 秒間、無表情で正面を向いてください…");
+  els.obCalib.disabled = true; els.obCalib.textContent = t("ob3.measuring"); els.btnCalib.disabled = true;
+  setStatus(t("msg.calibStart"));
 }
 function finishCalib() {
   const values = {};
@@ -529,17 +537,17 @@ function finishCalib() {
   els.calibDone.hidden = false;
   els.calibDone.style.animation = "none"; void els.calibDone.offsetWidth; els.calibDone.style.animation = ""; // 完了の動きを毎回出す
   els.stage.classList.add("ok"); setTimeout(() => els.stage.classList.remove("ok"), 1200);
-  els.obCalib.disabled = false; els.obCalib.textContent = "取り直す"; els.btnCalib.disabled = false;
+  els.obCalib.disabled = false; els.obCalib.textContent = t("ob3.retake"); els.btnCalib.disabled = false;
   els.obCalibNext.disabled = false;
-  setStatus("無表情の基準を取りました。ここからの変化で判定します");
+  setStatus(t("msg.calibDone"));
   console.log("[fw] baseline", values);
 }
 function cancelCalib() {
   calib = null;
   els.calibBar.style.width = "0%";
   els.calibCount.hidden = true; els.countdown.hidden = true;
-  els.obCalib.disabled = false; els.obCalib.textContent = baseline ? "取り直す" : "基準を取る"; els.btnCalib.disabled = false;
-  setStatus("顔が見つからず、基準を取れませんでした。明るい場所で正面を向いて、もう一度試してください");
+  els.obCalib.disabled = false; els.obCalib.textContent = t(baseline ? "ob3.retake" : "ob3.take"); els.btnCalib.disabled = false;
+  setStatus(t("msg.calibFail"));
 }
 
 function processFrame(now) {
@@ -573,12 +581,12 @@ function processFrame(now) {
     if (tex) { pushPeak("tex:energy", tex.energy, now); pushPeak("tex:vertical", tex.vertical, now); }
     if (calib) {
       calib.n++;
-      for (const [k, t] of Object.entries(TARGETS)) calib.sums[k] = (calib.sums[k] || 0) + t.score(v);
+      for (const [k, tg] of Object.entries(TARGETS)) calib.sums[k] = (calib.sums[k] || 0) + tg.score(v);
       calib.geo.gap += geo.gap; calib.geo.drop += geo.drop;
       if (tex) { calib.texN++; calib.tex.energy += tex.energy; calib.tex.vertical += tex.vertical; }
     }
-    for (const [k, t] of Object.entries(TARGETS)) {
-      const eff = Math.max(0, t.score(v) - (baseline?.values?.[k] ?? 0));
+    for (const [k, tg] of Object.entries(TARGETS)) {
+      const eff = Math.max(0, tg.score(v) - (baseline?.values?.[k] ?? 0));
       liveEff[k] = eff;
       const cfg = settings.targets[k];
       if (!cfg.on || calib) continue;
@@ -598,7 +606,7 @@ function processFrame(now) {
       const n = Math.ceil(remain / 1000);
       els.calibBar.style.width = `${(1 - remain / CALIB_MS) * 100}%`;
       els.calibCount.textContent = n; els.countdown.textContent = n;
-      setStatus(`そのまま… あと ${n} 秒`);
+      setStatus(t("msg.calibCountdown", { n }));
     }
   }
   if (now - lastUi > 250) { lastUi = now; updateLiveValues(); renderDiag(); }
@@ -635,12 +643,14 @@ async function createLandmarker() {
 }
 
 function setButtons(mode) { // idle | loading | running
+  currentMode = mode;
   els.btnStart.hidden = mode === "running";
   els.btnStart.disabled = mode === "loading";
-  els.btnStart.textContent = mode === "loading" ? "準備中…" : "見守りを開始";
+  els.btnStart.textContent = t(mode === "loading" ? "btn.preparing" : "btn.start");
   els.btnPip.hidden = !(mode === "running" && pipSupported());
   els.btnStop.hidden = mode !== "running";
-  els.btnPip.textContent = pipWindow ? "小窓を閉じる" : "小窓にする";
+  els.btnStop.textContent = t("btn.stop");
+  els.btnPip.textContent = t(pipWindow ? "btn.pipClose" : "btn.pip");
   setCameraButton(mode === "running", mode === "loading");
 }
 
@@ -650,11 +660,11 @@ async function start() {
   setButtons("loading"); setState("loading");
   try {
     if (!landmarker) {
-      setStatus("判定モデルを読み込んでいます…");
+      setStatus(t("msg.modelLoading"));
       landmarker = await createLandmarker();
       console.log("[fw] model loaded");
     }
-    setStatus("カメラを起動しています…");
+    setStatus(t("msg.cameraStarting"));
     stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
     els.video.srcObject = stream;
     await els.video.play();
@@ -662,13 +672,12 @@ async function start() {
     running = true; lastTick = null; lastProcess = 0; frameCount = 0;
     resetStates();
     setButtons("running"); setState("on");
-    setStatus(pipSupported() ? "見守っています。「小窓にする」を押すと、ほかのアプリの上に残ります" : "見守っています。このタブが見えている間だけ判定します");
+    setStatus(t(pipSupported() ? "msg.watchingPip" : "msg.watchingNoPip"));
     scheduleNext();
     return true;
   } catch (e) {
     console.error("[fw] start failed", e);
-    const denied = e?.name === "NotAllowedError";
-    setStatus(denied ? "カメラの許可が得られませんでした。アドレスバーのカメラのアイコンから許可してください" : "開始できませんでした: " + (e?.message || e));
+    setStatus(e?.name === "NotAllowedError" ? t("msg.cameraDenied") : t("msg.startFailed", { err: e?.message || e }));
     setButtons("idle"); setState("off");
     return false;
   }
@@ -677,14 +686,14 @@ async function start() {
 function stop() {
   running = false; loopGen++;
   if (pipWindow) { try { pipWindow.close(); } catch {} }
-  if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; }
+  if (stream) { for (const tr of stream.getTracks()) tr.stop(); stream = null; }
   els.video.srcObject = null;
   calib = null; resetStates();
   for (const k of Object.keys(TARGETS)) liveEff[k] = null;
   diag.scores = null; diag.geo = null; diag.tex = null;
   updateMeters(); updateAlertUI(); updateLiveValues(); renderDiag(); drawOverlay(null);
   saveStats(); renderStats();
-  setButtons("idle"); setState("off"); setStatus("停止しました");
+  setButtons("idle"); setState("off"); setStatus(t("msg.stopped"));
 }
 
 async function togglePip() {
@@ -704,26 +713,27 @@ async function togglePip() {
     pipWindow = pip;
     updatePlaceholder();
     setButtons("running"); if (running) setState("pip");
-    setStatus("小窓で見守っています。このタブを離れても判定は続きます");
+    setStatus(t("msg.pipOn"));
     pip.addEventListener("pagehide", () => {
       pipWindow = null;
       (currentHost || els.mainStageHost).append(els.stage);
       updatePlaceholder();
       els.video.play().catch(() => {});
-      if (running) { setButtons("running"); setState("on"); setStatus("小窓を閉じました。このタブが見えている間だけ判定します"); }
+      if (running) { setButtons("running"); setState("on"); setStatus(t("msg.pipClosed")); }
       scheduleNext();
     });
     scheduleNext();
   } catch (e) {
     console.error("[fw] pip failed", e);
-    setStatus("小窓を開けませんでした: " + (e?.message || e));
+    setStatus(t("msg.pipFailed", { err: e?.message || e }));
   }
 }
 
 // ---------- 動作環境チェック ----------
+// 結果は鍵で持ち、描くときに翻訳する。言語を切り替えても描き直せるようにするため
 async function checkEnvironment() {
   const ua = navigator.userAgent;
-  let name = "不明なブラウザ", ver = 0, chromium = false;
+  let name = null, ver = 0, chromium = false;
   const brands = navigator.userAgentData?.brands || [];
   const b = brands.find(x => /Google Chrome|Microsoft Edge/.test(x.brand)) || brands.find(x => /Chromium/.test(x.brand));
   let m;
@@ -738,36 +748,34 @@ async function checkEnvironment() {
     cams = devices ? devices.filter(d => d.kind === "videoinput").length : null;
   } catch { cams = null; }
   const items = [
-    { label: "ブラウザ", ok: chromium && ver >= 116, required: true, detail: `${name} ${ver || ""}`.trim(),
-      fix: chromium ? "Chrome を 116 以降に更新してください" : "Chrome で開いてください。Safari と Firefox では小窓が使えません" },
-    { label: "安全な接続", ok: !!window.isSecureContext, required: true, detail: location.origin,
-      fix: "https か http://localhost で開いてください。カメラは安全な接続でしか使えません" },
-    { label: "カメラを使う機能", ok: !!navigator.mediaDevices?.getUserMedia, required: true, detail: "",
-      fix: "このブラウザではカメラを扱えません" },
-    { label: "カメラの機器", ok: cams == null ? true : cams > 0, required: true, detail: cams == null ? "確認できませんでした" : `${cams} 台`,
-      fix: "カメラが見つかりません。内蔵カメラのある PC か、外付けカメラをつないでください" },
-    { label: "小窓（常に最前面）", ok: pipSupported(), required: false, detail: "",
-      fix: "小窓なしでも使えますが、このタブが見える位置にある間だけ判定します" },
-    { label: "通知", ok: "Notification" in window, required: false, detail: "",
-      fix: "通知は使えません。音と小窓の赤い枠で知らせます" },
-    { label: "判定の高速化（WebGL2）", ok: !!document.createElement("canvas").getContext("webgl2"), required: false, detail: "",
-      fix: "高速化なしで動きます。電池の減りが早くなることがあります" },
+    { key: "browser", ok: chromium && ver >= 116, required: true, detail: name ? `${name} ${ver || ""}`.trim() : { key: "env.unknown" },
+      fix: chromium ? "env.fix.browserUpdate" : "env.fix.browserOther" },
+    { key: "secure", ok: !!window.isSecureContext, required: true, detail: location.origin, fix: "env.fix.secure" },
+    { key: "cameraApi", ok: !!navigator.mediaDevices?.getUserMedia, required: true, detail: "", fix: "env.fix.cameraApi" },
+    { key: "cameraDevice", ok: cams == null ? true : cams > 0, required: true, detail: cams == null ? { key: "env.camsUnknown" } : { key: "env.cams", params: { n: cams } }, fix: "env.fix.cameraDevice" },
+    { key: "pip", ok: pipSupported(), required: false, detail: "", fix: "env.fix.pip" },
+    { key: "notification", ok: "Notification" in window, required: false, detail: "", fix: "env.fix.notification" },
+    { key: "webgl", ok: !!document.createElement("canvas").getContext("webgl2"), required: false, detail: "", fix: "env.fix.webgl" },
   ];
   return { ok: items.every(i => i.ok || !i.required), items };
 }
 function renderEnv(container, r) {
+  envResults.set(container, r);
+  const label = i => t("env." + i.key);
+  const detail = i => typeof i.detail === "string" ? i.detail : t(i.detail.key, i.detail.params);
+  const sep = lang === "ja" ? "、" : ", ";
   const ng = r.items.filter(i => !i.ok && i.required), warn = r.items.filter(i => !i.ok && !i.required);
   const verdict = r.ok
-    ? (warn.length ? `使えます。ただし ${warn.map(i => i.label).join("、")} は使えません` : "使えます。必要なものはすべて揃っています")
-    : `このままでは使えません。${ng.map(i => i.label).join("、")} に問題があります`;
+    ? (warn.length ? t("env.okBut", { items: warn.map(label).join(sep) }) : t("env.ok"))
+    : t("env.ng", { items: ng.map(label).join(sep) });
   container.hidden = false;
   container.innerHTML = `<div class="verdict ${r.ok ? "ok" : "ng"}">${r.ok ? "✓" : "✗"} ${verdict}</div><ul>` +
-    r.items.map(i => `<li class="${i.ok ? "ok" : i.required ? "ng" : "warn"}"><span class="mark">${i.ok ? "✓" : "!"}</span><div><div>${i.label}${i.detail ? `<span class="detail">${i.detail}</span>` : ""}</div>${i.ok ? "" : `<div class="fix">${i.fix}</div>`}</div></li>`).join("") + `</ul>`;
+    r.items.map(i => `<li class="${i.ok ? "ok" : i.required ? "ng" : "warn"}"><span class="mark">${i.ok ? "✓" : "!"}</span><div><div>${label(i)}${detail(i) ? `<span class="detail">${detail(i)}</span>` : ""}</div>${i.ok ? "" : `<div class="fix">${t(i.fix)}</div>`}</div></li>`).join("") + `</ul>`;
 }
 async function runEnvCheck(btn, container) {
-  btn.disabled = true; const label = btn.textContent; btn.textContent = "確認中…";
+  btn.disabled = true; btn.textContent = t("env.checking");
   try { renderEnv(container, await checkEnvironment()); }
-  finally { btn.disabled = false; btn.textContent = label; }
+  finally { btn.disabled = false; btn.textContent = t("env.check"); }
 }
 
 // ---------- セットアップ ----------
@@ -789,9 +797,9 @@ function showStep(n) {
   }
   if (n === 2) {
     mountStage(els.obStageHost);
-    setCameraButton(running);
+    setCameraButton(running, currentMode === "loading");
     els.obCameraNext.disabled = !running;
-    els.obCameraStatus.textContent = running ? "カメラは動いています。次へ進んでください" : "";
+    els.obCameraStatus.textContent = running ? t("msg.cameraRunning") : "";
   }
   if (n === 3) {
     mountStage(els.obCalibStageHost);
@@ -800,13 +808,13 @@ function showStep(n) {
     els.calibBar.parentElement.classList.toggle("done", !!baseline);
     els.calibDone.hidden = !baseline;
     els.calibCount.hidden = true;
-    els.obCalib.textContent = baseline ? "取り直す" : "基準を取る";
-    els.obCalibStatus.textContent = baseline ? "基準は取得済みです。取り直すこともできます" : "";
+    els.obCalib.textContent = t(calib ? "ob3.measuring" : baseline ? "ob3.retake" : "ob3.take");
+    els.obCalibStatus.textContent = baseline ? t("msg.baselineExists") : "";
   }
   if (n === 5) {
     const ok = pipSupported();
     els.obPipNote.hidden = ok; els.obPip.hidden = !ok;
-    if (!ok) els.obPipNote.textContent = "この Chrome では小窓が使えません。このタブを開いたまま、別の窓で動画を見てください。Chrome 116 以降なら小窓が使えます";
+    if (!ok) els.obPipNote.textContent = t("ob5.nopip");
   }
   window.scrollTo({ top: 0 });
 }
@@ -815,11 +823,25 @@ function finishOnboarding() {
   showMain();
 }
 
+// ---------- 言語 ----------
+// 静的な文は data-i18n で、動的な部分は描画関数を呼び直して切り替える。再読み込みはしない
+function applyLanguage(l) {
+  lang = l; t = makeT(l); setLang(l);
+  document.documentElement.lang = l;
+  applyStatic(document, t);
+  for (const b of els.lang.querySelectorAll("button")) b.classList.toggle("on", b.dataset.lang === l);
+  els.version.textContent = t("footer.version", { v: APP_VERSION });
+  buildTargetTable(); buildMeters(); buildFocusSelect(); renderSettings(); renderStats(); renderDiag(); updateAlertUI();
+  setButtons(currentMode); setState(currentState); updatePlaceholder();
+  if (!els.onboarding.hidden) showStep(obStep);
+  for (const [container, r] of envResults) renderEnv(container, r);
+}
+
 // ---------- イベント ----------
 for (const b of els.onboarding.querySelectorAll("[data-next]")) b.addEventListener("click", () => showStep(obStep + 1));
 els.obCamera.addEventListener("click", async () => {
   mountStage(els.obStageHost);
-  if (await start()) { setCameraButton(true); els.obCameraNext.disabled = false; els.obCameraStatus.textContent = "映りました。次へ進んでください"; }
+  if (await start()) { setCameraButton(true); els.obCameraNext.disabled = false; els.obCameraStatus.textContent = t("msg.cameraOk"); }
 });
 els.obCalib.addEventListener("click", async () => {
   if (!running) { mountStage(els.obCalibStageHost); if (!(await start())) return; }
@@ -840,11 +862,12 @@ els.envCheckBtn.addEventListener("click", () => runEnvCheck(els.envCheckBtn, els
 els.envCheckBtn2.addEventListener("click", () => runEnvCheck(els.envCheckBtn2, els.envResult2));
 els.linkPrivacy.addEventListener("click", () => { els.privacy.open = true; });
 els.linkEnv.addEventListener("click", () => { els.privacy.open = true; runEnvCheck(els.envCheckBtn2, els.envResult2); });
+els.lang.addEventListener("click", e => { const b = e.target.closest("button"); if (b && LANGS.includes(b.dataset.lang)) applyLanguage(b.dataset.lang); });
 
 for (const b of all(".btnTest")) b.addEventListener("click", () => {
   ensureAudio();
-  flashStage("テスト: 眉間に力が入っています");
-  if (!settings.sound && !settings.notify) setStatus("音も通知もオフです。小窓の枠が赤くなるだけで知らせます");
+  flashStage(t("alert.test"));
+  if (!settings.sound && !settings.notify) setStatus(t("msg.testOff"));
   else { states.glabella.lastAlertAt = -Infinity; notify("glabella"); }
 });
 for (const el of all(".optSound")) el.addEventListener("change", () => {
@@ -852,11 +875,8 @@ for (const el of all(".optSound")) el.addEventListener("change", () => {
 });
 for (const el of all(".optNotify")) el.addEventListener("change", async () => {
   if (el.checked) {
-    if (!("Notification" in window)) { setStatus("この環境では通知が使えません"); el.checked = false; }
-    else if (await Notification.requestPermission() !== "granted") {
-      setStatus("通知が許可されていません。Chrome の通知設定と、macOS の通知設定で Chrome を許可してください");
-      el.checked = false;
-    }
+    if (!("Notification" in window)) { setStatus(t("msg.noNotification")); el.checked = false; }
+    else if (await Notification.requestPermission() !== "granted") { setStatus(t("msg.notifyDenied")); el.checked = false; }
   }
   settings.notify = el.checked; saveSettings(); renderSettings();
 });
@@ -868,11 +888,11 @@ els.btnCsv.addEventListener("click", async () => {
     return [dk, ...keys.flatMap(k => [s.targets[k].count, Math.round(s.targets[k].sec)]), Math.round(s.faceSec), Math.round(s.noFaceSec)].join(",");
   });
   const csv = [head.join(","), ...rows].join("\n");
-  try { await navigator.clipboard.writeText(csv); setStatus(`CSV をコピーしました（${rows.length} 日分）`); }
-  catch { setStatus("コピーできませんでした。コンソールに出力します"); console.log(csv); }
+  try { await navigator.clipboard.writeText(csv); setStatus(t("msg.csvCopied", { n: rows.length })); }
+  catch { setStatus(t("msg.csvFailed")); console.log(csv); }
 });
 els.btnReset.addEventListener("click", () => {
-  if (!confirm("今日の記録を消しますか？")) return;
+  if (!confirm(t("confirm.reset"))) return;
   delete stats[dateKey()]; saveStats(); renderStats(); updateAlertUI();
 });
 els.video.addEventListener("loadedmetadata", () => {
@@ -882,15 +902,13 @@ window.addEventListener("beforeunload", saveStats);
 
 // ---------- 初期化 ----------
 if (settings.notify && !("Notification" in window && Notification.permission === "granted")) settings.notify = false;
-buildTargetTable(); buildMeters(); buildFocusSelect(); renderSettings(); renderStats(); updateAlertUI(); renderDiag();
-setButtons("idle"); setState("off");
-els.version.textContent = `v${APP_VERSION} 試作`;
+applyLanguage(lang);
 checkEnvironment().then(r => { if (!r.ok) renderEnv(els.envResult, r); }); // 足りないものがあれば最初から見せる
 const params = new URLSearchParams(location.search);
 if (params.has("open")) for (const d of document.querySelectorAll("details")) d.open = true;
 if (params.has("env")) runEnvCheck(els.envCheckBtn, els.envResult);
-if (location.hash === "#privacy") { els.privacy.open = true; els.privacy.scrollIntoView(); }
 if (params.has("ob")) showOnboarding(Number(params.get("ob")) || 1);
 else if (params.has("autostart")) { showMain(); start(); }
 else if (settings.onboarded) showMain();
 else showOnboarding(1);
+if (location.hash === "#privacy") { els.privacy.open = true; els.privacy.scrollIntoView(); }
