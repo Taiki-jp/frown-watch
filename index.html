@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<title>Frown Watch</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#0e1116; --panel:#171b23; --panel2:#1f2430; --fg:#e9ecf2; --muted:#98a2b3;
+  --accent:#4ea8ff; --ok:#3ddc84; --warn:#ffb020; --alert:#ff4d4f; --border:#2a3140;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
+header{display:flex;align-items:baseline;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border)}
+header h1{font-size:18px;margin:0}
+header .sub{color:var(--muted);font-size:12px}
+main{display:grid;grid-template-columns:minmax(320px,520px) 1fr;gap:20px;padding:20px;max-width:1200px}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+.col{display:flex;flex-direction:column;gap:20px;min-width:0}
+section.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+h2{font-size:13px;margin:0 0 10px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#06131f;font-weight:600}
+button:disabled{opacity:.45;cursor:default}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.status{color:var(--fg);font-size:13px;min-height:1.6em}
+label.chk{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 6px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:12px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+input[type=range]{width:100px;vertical-align:middle}
+input[type=number]{width:62px;background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font:inherit}
+select{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font:inherit}
+.live{display:inline-block;min-width:3.5em;text-align:right;font-variant-numeric:tabular-nums}
+.hint{color:var(--muted);font-size:12px;margin:6px 0 0}
+small.k{color:var(--muted)}
+a{color:var(--accent)}
+code{font-size:12px;color:var(--muted)}
+.dbar{height:6px;width:120px;background:var(--panel2);border-radius:3px}
+.dbar div{height:100%;background:var(--accent);border-radius:3px}
+
+/* ---- stage: この要素ごと小窓（Document PiP）へ移動する ---- */
+.stage{position:relative;width:100%;aspect-ratio:4/3;background:#000;border:4px solid var(--border);border-radius:12px;overflow:hidden;transition:border-color .2s}
+.stage.alert{border-color:var(--alert);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:inset 0 0 0 0 rgba(255,77,79,0)}50%{box-shadow:inset 0 0 0 6px rgba(255,77,79,.5)}}
+.stage video,.stage canvas.overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.stage canvas.inset{position:absolute;top:8px;right:8px;width:42%;aspect-ratio:4/3;border:2px solid rgba(255,255,255,.75);border-radius:8px;background:#000;display:none}
+.stage.has-inset canvas.inset{display:block}
+.stage .inset-label{position:absolute;top:10px;right:8px;width:42%;text-align:center;font-size:11px;color:#fff;text-shadow:0 1px 2px #000;pointer-events:none;display:none}
+.stage.has-inset .inset-label{display:block}
+.hud{position:absolute;left:0;right:0;bottom:0;padding:8px 10px;background:linear-gradient(transparent,rgba(0,0,0,.75));pointer-events:none}
+.alert-label{font-weight:700;font-size:16px;color:#fff;text-shadow:0 1px 3px #000;min-height:1.4em}
+.stage.alert .alert-label{color:#ffd6d6}
+.meters{display:flex;flex-direction:column;gap:3px;margin-top:4px}
+.meter{display:flex;align-items:center;gap:6px;font-size:11px;color:#fff;text-shadow:0 1px 2px #000}
+.meter .m-label{width:4em;flex:none}
+.meter .m-bar{position:relative;flex:1;height:6px;background:rgba(255,255,255,.2);border-radius:3px}
+.meter .m-fill{height:100%;width:0;background:var(--ok);border-radius:3px;transition:width .1s linear}
+.meter.over .m-fill{background:var(--alert)}
+.meter .m-th{position:absolute;top:-2px;width:2px;height:10px;background:#fff}
+.hud-footer{display:flex;justify-content:space-between;font-size:11px;color:#ddd;text-shadow:0 1px 2px #000;margin-top:4px}
+body.pip{background:#000;overflow:hidden}
+body.pip .stage{width:100vw;height:100vh;border-radius:0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Frown Watch</h1>
+  <span class="sub">表情の癖に気づかせる試作。映像は PC の外に出ません。</span>
+</header>
+<main>
+  <div class="col">
+    <section class="panel">
+      <div id="stageHost">
+        <div id="stage" class="stage">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay" class="overlay"></canvas>
+          <canvas id="inset" class="inset"></canvas>
+          <div id="insetLabel" class="inset-label"></div>
+          <div class="hud">
+            <div id="alertLabel" class="alert-label"></div>
+            <div id="meters" class="meters"></div>
+            <div class="hud-footer"><span id="hudStatus">停止中</span><span id="hudCount"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="btnStart" class="primary">カメラを開始</button>
+        <button id="btnPip" disabled>小窓にする</button>
+        <button id="btnCalib" disabled>無表情の基準を取る</button>
+        <button id="btnStop" disabled>停止</button>
+      </div>
+      <div id="status" class="status">準備中…</div>
+      <div id="baselineInfo" class="hint"></div>
+      <p class="hint">小窓は他のアプリの上にも残ります。小窓を出したまま、別タブや別アプリで YouTube を見てください。</p>
+    </section>
+    <section class="panel">
+      <h2>知らせ方</h2>
+      <div class="row">
+        <label class="chk"><input type="checkbox" id="optSound"> 音で知らせる</label>
+        <label class="chk"><input type="checkbox" id="optNotify"> 通知で知らせる</label>
+        <button id="btnTest">試しに鳴らす</button>
+      </div>
+      <div class="row">
+        <label>拡大して映す部位 <select id="focusArea"></select></label>
+      </div>
+      <p class="hint">枠の赤い点滅は癖が続いている間ずっと出ます。音と通知は「休止」の秒数だけ間隔をあけます。</p>
+    </section>
+  </div>
+  <div class="col">
+    <section class="panel">
+      <h2>見張る癖と条件</h2>
+      <table id="targets"></table>
+      <p class="hint">値は 0〜1。無表情の基準を取ると、基準からの増分で判定します。「今の値」を見ながらしきい値を決めてください。</p>
+    </section>
+    <section class="panel">
+      <h2>診断: 判定に使える生の値</h2>
+      <table id="diag"></table>
+      <p class="hint">思いきり顰めて、どの値が動くかを見るための表。判定には今のところ browDownLeft と browDownRight の平均だけを使っています。</p>
+    </section>
+    <section class="panel">
+      <h2>今日の記録</h2>
+      <div id="today"></div>
+      <h2 style="margin-top:14px">直近14日</h2>
+      <table id="history"></table>
+      <div class="row" style="margin-top:10px">
+        <button id="btnCsv">CSV をコピー</button>
+        <button id="btnReset">今日の記録を消す</button>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>動作条件</h2>
+      <ul class="hint" style="margin:0;padding-left:18px">
+        <li>Chrome 116 以降。小窓表示は Safari と Firefox では使えません</li>
+        <li>http://localhost か https で開くこと。カメラの許可が必要です</li>
+        <li>判定ライブラリとモデルはこのページと一緒に配布しています。外部のサーバーからは何も読み込みません</li>
+        <li>映像は端末内で処理し、記録はこのブラウザの localStorage にだけ残ります</li>
+      </ul>
+    </section>
+    <section class="panel">
+      <h2>映像が外に出ないことの確認方法</h2>
+      <ul class="hint" style="margin:0;padding-left:18px">
+        <li>開発者ツールの Network タブを開いたままカメラを開始する。最初の読み込み以外に通信が起きません</li>
+        <li>カメラを開始したあとに Wi-Fi を切っても、そのまま動き続けます</li>
+        <li>このページの CSP で、配布元以外への通信をブラウザ自身が禁止しています。ページのソースの冒頭にある meta タグで確認できます</li>
+        <li>ビルド工程がなく、配布しているファイルがそのまま動きます。「ページのソースを表示」で全文を読めます</li>
+        <li>ソースコードは <a href="https://github.com/Taiki-jp/frown-watch">GitHub の公開リポジトリ</a> にあり、そこからそのまま配信しています</li>
+      </ul>
+    </section>
+  </div>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

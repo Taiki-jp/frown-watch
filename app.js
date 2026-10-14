@@ -1,0 +1,610 @@
+import { FaceLandmarker, FilesetResolver } from "./vendor/mediapipe/vision_bundle.mjs";
+
+const MP_WASM = "./vendor/mediapipe/wasm";
+const MODEL_URL = "./vendor/models/face_landmarker.task";
+const PROCESS_INTERVAL_MS = 100; // 約 10fps
+const CALIB_MS = 3000;
+
+/*PURE-START*/
+const avg = (...xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+const clamp01 = x => Math.max(0, Math.min(1, x));
+
+// 見張る癖。score は blendshape の値を返す関数 v(name) から癖の強さ（0〜1）を作る
+const TARGETS = {
+  glabella: { label: "眉間", desc: "眉を寄せる・下げる", defaults: { on: true, threshold: 0.30, duration: 2, cooldown: 45 },
+    score: v => avg(v("browDownLeft"), v("browDownRight")) },
+  forehead: { label: "額", desc: "眉を上げて額にしわが寄る", defaults: { on: false, threshold: 0.35, duration: 2, cooldown: 45 },
+    score: v => Math.max(v("browInnerUp"), avg(v("browOuterUpLeft"), v("browOuterUpRight"))) },
+  squint: { label: "目元", desc: "目を細める。笑顔のときは数えない", defaults: { on: false, threshold: 0.35, duration: 2, cooldown: 45 },
+    score: v => avg(v("mouthSmileLeft"), v("mouthSmileRight")) > 0.4 ? 0 : avg(v("eyeSquintLeft"), v("eyeSquintRight")) },
+  mouth: { label: "口角", desc: "口角が下がる", defaults: { on: false, threshold: 0.30, duration: 3, cooldown: 60 },
+    score: v => avg(v("mouthFrownLeft"), v("mouthFrownRight")) },
+  jaw: { label: "口が開く", desc: "口がぽかんと開いたまま", defaults: { on: false, threshold: 0.25, duration: 5, cooldown: 60 },
+    score: v => v("jawOpen") },
+};
+
+const EMA_ALPHA = 0.35;    // 平滑化。1 に近いほど生の値に追従する
+const RELEASE_RATIO = 0.7; // しきい値のこの割合を下回ったら解除
+
+function newTargetState() { return { ema: 0, aboveSince: null, active: false, lastAlertAt: -Infinity }; }
+
+// 1 フレーム分進める。score は基準を引いた後の値、now はミリ秒、dt は前フレームからの秒
+function stepTarget(st, score, now, dt, cfg) {
+  st.ema += EMA_ALPHA * (score - st.ema);
+  const out = { episodeStart: false, alert: false, activeSec: 0 };
+  if (st.ema >= cfg.threshold) {
+    if (st.aboveSince == null) st.aboveSince = now;
+    if (!st.active && now - st.aboveSince >= cfg.duration * 1000) {
+      st.active = true;
+      out.episodeStart = true;
+      if (now - st.lastAlertAt >= cfg.cooldown * 1000) { st.lastAlertAt = now; out.alert = true; }
+    }
+  } else if (st.ema < cfg.threshold * RELEASE_RATIO) {
+    st.aboveSince = null;
+    st.active = false;
+  }
+  if (st.active) out.activeSec = dt;
+  return out;
+}
+/*PURE-END*/
+
+// 拡大して映す部位。MediaPipe Face Landmarker の landmark 番号で囲む範囲を決める
+// 左右は鏡に映った自分から見た向き（右＝画面の右側）
+const ROIS = {
+  glabella: { label: "眉間", idx: [107, 55, 193, 336, 285, 417, 9, 8, 168, 151, 66, 296], pad: 0.6 },
+  forehead: { label: "額", idx: [10, 109, 338, 67, 297, 103, 332, 105, 334, 66, 296, 107, 336], pad: 0.3 },
+  eyeR: { label: "目尻（右）", idx: [33, 130, 226, 113, 247, 143, 35, 124, 156, 7, 25, 110, 31, 111], pad: 0.6 },
+  eyeL: { label: "目尻（左）", idx: [263, 359, 446, 342, 467, 372, 265, 353, 383, 249, 255, 339, 261, 340], pad: 0.6 },
+  nasoR: { label: "ほうれい線（右）", idx: [98, 205, 61, 206, 203, 216, 212, 207, 187, 50, 92, 165, 186, 185, 40], pad: 0.4 },
+  nasoL: { label: "ほうれい線（左）", idx: [327, 425, 291, 426, 423, 436, 432, 427, 411, 280, 322, 391, 410, 409, 270], pad: 0.4 },
+  mouth: { label: "口元", idx: [61, 291, 0, 17, 37, 267, 84, 314, 40, 270, 91, 321], pad: 0.5 },
+};
+
+// ---------- 診断用の幾何特徴 ----------
+// landmark は正規化座標（x, y は 0〜1、z は x と同じ尺度）。3D の距離で測るので顔の向きの影響が小さい
+function p3(lm, i, vw, vh) { const p = lm[i]; return [p.x * vw, p.y * vh, p.z * vw]; }
+function dist3(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
+function mid3(a, b) { return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]; }
+function geoFeatures(lm, vw, vh) {
+  const P = i => p3(lm, i, vw, vh);
+  const browR = mid3(P(107), P(55)), browL = mid3(P(336), P(285)); // 眉頭（眉の内側の端）
+  const eyeMid = mid3(P(133), P(362));                              // 目頭の中点
+  const iod = dist3(P(33), P(263));                                 // 目尻から目尻。表情で動かない
+  const eyeToNose = dist3(eyeMid, P(2));                            // 目頭の中点から鼻の下。表情で動かない
+  return {
+    gap: dist3(browR, browL) / iod,                      // 眉頭の間隔。寄せると小さくなる
+    drop: dist3(mid3(browR, browL), eyeMid) / eyeToNose, // 眉頭の高さ。下げると小さくなる
+  };
+}
+const DIAG_BLEND = ["browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
+  "eyeSquintLeft", "eyeSquintRight", "eyeBlinkLeft", "eyeBlinkRight", "cheekSquintLeft", "cheekSquintRight",
+  "noseSneerLeft", "noseSneerRight", "mouthFrownLeft", "mouthFrownRight", "jawOpen"];
+// 眉間の皮膚だけを囲む箱。眉毛を含めないよう、眉頭の内側の端の間に限る
+function glabellaSkinBox(lm, vw, vh) {
+  const x0 = lm[55].x * vw, x1 = lm[285].x * vw;    // 眉頭の内側の端
+  const yTop = Math.min(lm[107].y, lm[336].y) * vh;   // 眉頭の上端
+  const yBot = lm[168].y * vh;                        // 目と目の間
+  const w = x1 - x0, h = yBot - yTop;
+  return { sx: x0 + w * 0.15, sy: yTop + h * 0.1, sw: w * 0.7, sh: h * 0.9 };
+}
+// RGBA の画素列から、しわの手がかりになる値を出す
+//   luma: 平均輝度（0〜255）。暗さの目安
+//   energy: 輝度で正規化した輪郭の強さ。しわが寄ると増える
+//   vertical: 輪郭のうち縦線の割合（0〜1）。眉間の縦じわで増える
+function textureFromPixels(d, W, H) {
+  const g = new Float32Array(W * H); let sum = 0;
+  for (let i = 0; i < W * H; i++) { const v = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]; g[i] = v; sum += v; }
+  const luma = sum / (W * H);
+  const b = new Float32Array(W * H); // 3x3 平均で雑音を抑える
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    let acc = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) acc += g[(y + dy) * W + x + dx];
+    b[y * W + x] = acc / 9;
+  }
+  let ex = 0, ey = 0, n = 0;
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+    const i = y * W + x;
+    ex += Math.abs(b[i + 1] - b[i - 1]); ey += Math.abs(b[i + W] - b[i - W]); n++;
+  }
+  return { luma, energy: (ex + ey) / n / (luma + 1) * 100, vertical: ex / (ex + ey + 1e-6) };
+}
+const TEX_W = 48, TEX_H = 48;
+let texCtx = null;
+function textureScore(lm, vw, vh) {
+  const bx = glabellaSkinBox(lm, vw, vh);
+  if (!(bx.sw >= 4 && bx.sh >= 4)) return null;
+  if (!texCtx) {
+    const c = document.createElement("canvas"); c.width = TEX_W; c.height = TEX_H;
+    texCtx = c.getContext("2d", { willReadFrequently: true });
+  }
+  texCtx.drawImage(els.video, bx.sx, bx.sy, bx.sw, bx.sh, 0, 0, TEX_W, TEX_H);
+  return textureFromPixels(texCtx.getImageData(0, 0, TEX_W, TEX_H).data, TEX_W, TEX_H);
+}
+const lumaNote = l => l < 50 ? "暗い。判定が不安定になります" : l < 90 ? "やや暗い" : l > 200 ? "明るすぎる。白飛びに注意" : "十分";
+
+const diag = { scores: null, geo: null, tex: null, peaks: {} }; // peaks: 名前 -> 直近 3 秒の { t, v }
+function pushPeak(name, v, now) {
+  const arr = (diag.peaks[name] ??= []);
+  arr.push({ t: now, v });
+  while (arr.length && now - arr[0].t > 3000) arr.shift();
+}
+function peakOf(name, fn = Math.max) {
+  const arr = diag.peaks[name];
+  if (!arr?.length) return null;
+  return arr.reduce((m, e) => fn(m, e.v), arr[0].v);
+}
+
+// ---------- 保存 ----------
+const loadJSON = (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } };
+const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+function defaultSettings() {
+  const targets = {};
+  for (const [k, t] of Object.entries(TARGETS)) targets[k] = { ...t.defaults };
+  return { sound: true, notify: false, focus: "glabella", targets };
+}
+function loadSettings() {
+  const d = defaultSettings();
+  const s = loadJSON("fw.settings", null);
+  if (!s) return d;
+  const targets = {};
+  for (const k of Object.keys(TARGETS)) targets[k] = { ...d.targets[k], ...(s.targets?.[k] || {}) };
+  return { ...d, ...s, targets };
+}
+const settings = loadSettings();
+const saveSettings = () => saveJSON("fw.settings", settings);
+
+let baseline = loadJSON("fw.baseline", null); // { at, values: { key: number } }
+const stats = loadJSON("fw.stats", {});       // { "YYYY-MM-DD": { faceSec, noFaceSec, targets: { key: { count, sec } } } }
+const saveStats = () => saveJSON("fw.stats", stats);
+
+function emptyDay() {
+  const targets = {};
+  for (const k of Object.keys(TARGETS)) targets[k] = { count: 0, sec: 0 };
+  return { faceSec: 0, noFaceSec: 0, targets };
+}
+for (const day of Object.values(stats)) { // 癖の種類が増えたときに古い記録を補う
+  day.targets ??= {}; day.faceSec ??= 0; day.noFaceSec ??= 0;
+  for (const k of Object.keys(TARGETS)) day.targets[k] ??= { count: 0, sec: 0 };
+}
+function dateKey(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+const todayStats = () => (stats[dateKey()] ??= emptyDay());
+const fmtMin = sec => (sec / 60).toFixed(1);
+
+// ---------- 要素 ----------
+const $ = id => document.getElementById(id);
+const els = {};
+for (const id of ["stageHost", "stage", "video", "overlay", "inset", "insetLabel", "alertLabel", "meters", "hudStatus", "hudCount",
+  "btnStart", "btnPip", "btnCalib", "btnStop", "status", "baselineInfo", "optSound", "optNotify", "btnTest", "focusArea",
+  "targets", "today", "history", "btnCsv", "btnReset", "diag"]) els[id] = $(id);
+
+const setStatus = msg => { els.status.textContent = msg; };
+const setHud = msg => { els.hudStatus.textContent = msg; };
+
+// ---------- 実行状態 ----------
+let landmarker = null, stream = null, running = false, pipWindow = null;
+let loopGen = 0, lastProcess = 0, lastTick = null, lastUi = 0, lastStatsRender = 0, frameCount = 0;
+let calib = null; // { until, sums, n }
+let audioCtx = null;
+const states = {};
+const liveEff = {};
+const resetStates = () => { for (const k of Object.keys(TARGETS)) states[k] = newTargetState(); };
+resetStates();
+
+// ---------- UI 構築 ----------
+function buildTargetTable() {
+  const rows = Object.entries(TARGETS).map(([k, t]) => {
+    const c = settings.targets[k];
+    return `<tr data-key="${k}">
+      <td><label class="chk"><input type="checkbox" data-f="on" ${c.on ? "checked" : ""}> <b>${t.label}</b></label><br><small class="k">${t.desc}</small></td>
+      <td class="num"><span class="live" data-live="${k}">–</span></td>
+      <td><input type="range" data-f="threshold" min="0.05" max="0.9" step="0.05" value="${c.threshold}"> <span data-v="threshold">${c.threshold.toFixed(2)}</span></td>
+      <td><input type="number" data-f="duration" min="0.5" max="60" step="0.5" value="${c.duration}"> 秒</td>
+      <td><input type="number" data-f="cooldown" min="0" max="900" step="5" value="${c.cooldown}"> 秒</td>
+    </tr>`;
+  }).join("");
+  els.targets.innerHTML = `<thead><tr><th>癖</th><th class="num">今の値</th><th>しきい値</th><th>継続</th><th>休止</th></tr></thead><tbody>${rows}</tbody>`;
+  els.targets.addEventListener("input", e => {
+    const tr = e.target.closest("tr"); const f = e.target.dataset.f;
+    if (!tr || !f) return;
+    const k = tr.dataset.key;
+    const v = f === "on" ? e.target.checked : parseFloat(e.target.value);
+    if (f !== "on" && !Number.isFinite(v)) return;
+    settings.targets[k][f] = v;
+    if (f === "threshold") tr.querySelector('[data-v="threshold"]').textContent = v.toFixed(2);
+    if (f === "on") states[k] = newTargetState();
+    saveSettings(); buildMeters(); renderStats();
+  });
+}
+
+function buildMeters() {
+  els.meters.innerHTML = Object.entries(TARGETS).filter(([k]) => settings.targets[k].on).map(([k, t]) =>
+    `<div class="meter" data-key="${k}"><span class="m-label">${t.label}</span><div class="m-bar"><div class="m-fill"></div><div class="m-th" style="left:${settings.targets[k].threshold * 100}%"></div></div></div>`
+  ).join("");
+}
+function updateMeters() {
+  for (const m of els.meters.querySelectorAll(".meter")) {
+    const k = m.dataset.key;
+    m.querySelector(".m-fill").style.width = `${clamp01(states[k].ema) * 100}%`;
+    m.classList.toggle("over", states[k].active);
+  }
+}
+
+function buildFocusSelect() {
+  els.focusArea.innerHTML = `<option value="none">なし</option>` + Object.entries(ROIS).map(([k, r]) => `<option value="${k}">${r.label}</option>`).join("");
+  if (!(settings.focus in ROIS) && settings.focus !== "none") settings.focus = "none";
+  els.focusArea.value = settings.focus;
+  els.focusArea.addEventListener("change", () => { settings.focus = els.focusArea.value; saveSettings(); applyFocus(); });
+  applyFocus();
+}
+function applyFocus() {
+  const roi = ROIS[settings.focus];
+  els.stage.classList.toggle("has-inset", !!roi);
+  els.insetLabel.textContent = roi ? roi.label : "";
+}
+
+function renderBaselineInfo() {
+  if (!baseline) { els.baselineInfo.textContent = "基準: 未取得（無表情のときの値を 0 として判定しています）"; return; }
+  const when = new Date(baseline.at);
+  const parts = Object.keys(TARGETS).map(k => `${TARGETS[k].label} ${(baseline.values[k] ?? 0).toFixed(2)}`).join(" / ");
+  els.baselineInfo.textContent = `基準: ${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")} 取得。${parts}${baseline.geo ? ` / 眉頭の間隔 ${baseline.geo.gap.toFixed(3)} / 眉頭の高さ ${baseline.geo.drop.toFixed(3)}` : ""}`;
+}
+
+function renderStats() {
+  const day = todayStats();
+  const keys = Object.keys(TARGETS);
+  els.today.innerHTML = `<table><thead><tr><th>癖</th><th class="num">回数</th><th class="num">合計秒</th></tr></thead><tbody>` +
+    keys.map(k => `<tr><td>${TARGETS[k].label}${settings.targets[k].on ? "" : ' <small class="k">（見張っていない）</small>'}</td><td class="num">${day.targets[k].count}</td><td class="num">${Math.round(day.targets[k].sec)}</td></tr>`).join("") +
+    `</tbody></table><p class="hint">見張った時間 ${fmtMin(day.faceSec)} 分。顔が映っていなかった時間 ${fmtMin(day.noFaceSec)} 分。</p>`;
+  const days = [];
+  for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); days.push(dateKey(d)); }
+  els.history.innerHTML = `<thead><tr><th>日付</th>${keys.map(k => `<th class="num">${TARGETS[k].label}</th>`).join("")}<th class="num">見張り分</th></tr></thead><tbody>` +
+    days.map(dk => {
+      const s = stats[dk];
+      return `<tr><td>${dk.slice(5).replace("-", "/")}</td>${keys.map(k => `<td class="num">${s ? s.targets[k].count : "–"}</td>`).join("")}<td class="num">${s ? fmtMin(s.faceSec) : "–"}</td></tr>`;
+    }).join("") + `</tbody>`;
+}
+
+function updateLiveValues() {
+  for (const k of Object.keys(TARGETS)) {
+    const el = els.targets.querySelector(`[data-live="${k}"]`);
+    if (el) el.textContent = liveEff[k] == null ? "–" : liveEff[k].toFixed(2);
+  }
+}
+
+function renderDiag() {
+  if (!diag.scores || !diag.geo) { els.diag.innerHTML = `<tbody><tr><td class="hint">カメラを開始して顔が映ると表示します</td></tr></tbody>`; return; }
+  const pct = x => `${x >= 0 ? "+" : ""}${x.toFixed(0)}%`;
+  const bsRows = DIAG_BLEND.map(n => {
+    const v = diag.scores[n] ?? 0; const pk = peakOf(n) ?? v;
+    return `<tr><td><code>${n}</code></td><td class="num">${v.toFixed(2)}</td><td class="num">${pk.toFixed(2)}</td><td><div class="dbar"><div style="width:${clamp01(v) * 100}%"></div></div></td></tr>`;
+  }).join("");
+  const geoRow = (key, label) => {
+    const v = diag.geo[key]; const base = baseline?.geo?.[key]; const pk = peakOf("geo:" + key, Math.min);
+    const note = base ? `基準比 ${pct((v / base - 1) * 100)}。3 秒内の最小は ${pct((pk / base - 1) * 100)}` : '<small class="k">基準を取ると変化率を出します</small>';
+    return `<tr><td>${label}</td><td class="num">${v.toFixed(3)}</td><td class="num">${pk == null ? "–" : pk.toFixed(3)}</td><td>${note}</td></tr>`;
+  };
+  let texRows = "";
+  if (diag.tex) {
+    const t = diag.tex, bt = baseline?.tex;
+    const pkE = peakOf("tex:energy") ?? t.energy, pkV = peakOf("tex:vertical") ?? t.vertical;
+    texRows = `<tr><td>明るさ（眉間の皮膚の平均輝度）</td><td class="num">${t.luma.toFixed(0)}</td><td class="num">/ 255</td><td>${lumaNote(t.luma)}</td></tr>` +
+      `<tr><td>輪郭の強さ</td><td class="num">${t.energy.toFixed(2)}</td><td class="num">${pkE.toFixed(2)}</td><td>${bt ? `基準比 ${pct((t.energy / bt.energy - 1) * 100)}。3 秒内の最大は ${pct((pkE / bt.energy - 1) * 100)}` : '<small class="k">基準を取ると変化率を出します</small>'}</td></tr>` +
+      `<tr><td>縦線の割合</td><td class="num">${t.vertical.toFixed(2)}</td><td class="num">${pkV.toFixed(2)}</td><td>${bt ? `基準との差 ${(t.vertical - bt.vertical >= 0 ? "+" : "")}${(t.vertical - bt.vertical).toFixed(2)}` : ""}</td></tr>`;
+  }
+  els.diag.innerHTML = `<thead><tr><th>blendshape</th><th class="num">今</th><th class="num">3 秒内の最大</th><th></th></tr></thead><tbody>${bsRows}</tbody>` +
+    `<thead><tr><th>landmark の距離比</th><th class="num">今</th><th class="num">3 秒内の最小</th><th></th></tr></thead><tbody>${geoRow("gap", "眉頭の間隔 ÷ 目尻間")}${geoRow("drop", "眉頭の高さ ÷ 目から鼻下")}</tbody>` +
+    `<thead><tr><th>眉間の皮膚の画素</th><th class="num">今</th><th class="num">3 秒内の最大</th><th></th></tr></thead><tbody>${texRows}</tbody>`;
+}
+
+function updateAlertUI() {
+  const active = Object.keys(TARGETS).filter(k => settings.targets[k].on && states[k].active);
+  els.stage.classList.toggle("alert", active.length > 0);
+  els.alertLabel.textContent = active.length ? active.map(k => TARGETS[k].label).join("・") + "に力が入っています" : "";
+  const day = todayStats();
+  els.hudCount.textContent = "今日 " + Object.keys(TARGETS).filter(k => settings.targets[k].on).map(k => `${TARGETS[k].label} ${day.targets[k].count}`).join(" / ");
+}
+
+// ---------- 知らせる ----------
+function ensureAudio() {
+  try {
+    audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) { console.warn("[fw] audio unavailable", e); }
+}
+function playChime() {
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  [880, 660].forEach((f, i) => {
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    const t = t0 + i * 0.18;
+    o.type = "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t); o.stop(t + 0.3);
+  });
+}
+function notify(k) {
+  const t = TARGETS[k];
+  if (settings.sound) { ensureAudio(); playChime(); }
+  if (settings.notify && "Notification" in window && Notification.permission === "granted") {
+    try {
+      const n = new Notification(`${t.label}に力が入っています`, { body: "力を抜いて、表情をゆるめましょう", tag: "frown-watch", silent: !!settings.sound });
+      setTimeout(() => n.close(), 5000);
+    } catch (e) { console.warn("[fw] notification failed", e); }
+  }
+}
+
+// ---------- 判定ループ ----------
+function roiBox(landmarks, roi, vw, vh) {
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const i of roi.idx) {
+    const p = landmarks[i]; if (!p) continue;
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+  }
+  let w = (x1 - x0) * vw * (1 + roi.pad * 2), h = (y1 - y0) * vh * (1 + roi.pad * 2);
+  const cx = (x0 + x1) / 2 * vw, cy = (y0 + y1) / 2 * vh;
+  if (w / h > 4 / 3) h = w * 3 / 4; else w = h * 4 / 3;
+  const sx = Math.max(0, Math.min(cx - w / 2, vw - w)), sy = Math.max(0, Math.min(cy - h / 2, vh - h));
+  return { sx, sy, sw: Math.min(w, vw), sh: Math.min(h, vh) };
+}
+
+function drawOverlay(landmarks) {
+  const vw = els.video.videoWidth, vh = els.video.videoHeight;
+  if (!vw || !vh) return;
+  if (els.overlay.width !== vw || els.overlay.height !== vh) { els.overlay.width = vw; els.overlay.height = vh; }
+  const ctx = els.overlay.getContext("2d");
+  ctx.clearRect(0, 0, vw, vh);
+  const roi = ROIS[settings.focus];
+  if (!roi || !landmarks) return;
+  const b = roiBox(landmarks, roi, vw, vh);
+  ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = Math.max(2, vw / 400);
+  ctx.strokeRect(b.sx, b.sy, b.sw, b.sh);
+  const ic = els.inset, iw = 320, ih = 240;
+  if (ic.width !== iw || ic.height !== ih) { ic.width = iw; ic.height = ih; }
+  const ictx = ic.getContext("2d");
+  ictx.save(); ictx.scale(-1, 1); // 鏡と同じ向きにする
+  ictx.drawImage(els.video, b.sx, b.sy, b.sw, b.sh, -iw, 0, iw, ih);
+  ictx.restore();
+}
+
+function finishCalib() {
+  const values = {};
+  for (const k of Object.keys(TARGETS)) values[k] = calib.n ? calib.sums[k] / calib.n : 0;
+  const geo = calib.n ? { gap: calib.geo.gap / calib.n, drop: calib.geo.drop / calib.n } : null;
+  const tex = calib.texN ? { energy: calib.tex.energy / calib.texN, vertical: calib.tex.vertical / calib.texN } : null;
+  baseline = { at: Date.now(), values, geo, tex };
+  saveJSON("fw.baseline", baseline);
+  calib = null;
+  resetStates();
+  renderBaselineInfo();
+  setStatus("無表情の基準を取りました。ここからの増分で判定します");
+  console.log("[fw] baseline", values);
+}
+
+function processFrame(now) {
+  const dt = lastTick == null ? 0 : (now - lastTick) / 1000;
+  lastTick = now;
+  let res;
+  try { res = landmarker.detectForVideo(els.video, now); }
+  catch (e) { console.warn("[fw] detect error", e); return; }
+  const lm = res.faceLandmarks?.[0];
+  const bs = res.faceBlendshapes?.[0];
+  const day = todayStats();
+  frameCount++;
+  if (frameCount === 1 || frameCount % 100 === 0) console.log(`[fw] frame ${frameCount} faces=${lm ? 1 : 0}`);
+
+  if (!lm || !bs) {
+    day.noFaceSec += dt;
+    diag.scores = null; diag.geo = null; diag.tex = null;
+    for (const k of Object.keys(TARGETS)) { liveEff[k] = null; states[k].active = false; states[k].aboveSince = null; }
+    setHud("顔が見つかりません");
+    drawOverlay(null); updateMeters(); updateAlertUI();
+  } else {
+    day.faceSec += dt;
+    const scores = {};
+    for (const c of bs.categories) scores[c.categoryName] = c.score;
+    const v = name => scores[name] ?? 0;
+    const geo = geoFeatures(lm, els.video.videoWidth, els.video.videoHeight);
+    const tex = textureScore(lm, els.video.videoWidth, els.video.videoHeight);
+    diag.scores = scores; diag.geo = geo; diag.tex = tex;
+    for (const n of DIAG_BLEND) pushPeak(n, v(n), now);
+    pushPeak("geo:gap", geo.gap, now); pushPeak("geo:drop", geo.drop, now);
+    if (tex) { pushPeak("tex:energy", tex.energy, now); pushPeak("tex:vertical", tex.vertical, now); }
+    if (calib) {
+      calib.n++;
+      for (const [k, t] of Object.entries(TARGETS)) calib.sums[k] = (calib.sums[k] || 0) + t.score(v);
+      calib.geo.gap += geo.gap; calib.geo.drop += geo.drop;
+      if (tex) { calib.texN++; calib.tex.energy += tex.energy; calib.tex.vertical += tex.vertical; }
+      if (now >= calib.until) finishCalib();
+    }
+    for (const [k, t] of Object.entries(TARGETS)) {
+      const eff = Math.max(0, t.score(v) - (baseline?.values?.[k] ?? 0));
+      liveEff[k] = eff;
+      const cfg = settings.targets[k];
+      if (!cfg.on || calib) continue;
+      const out = stepTarget(states[k], eff, now, dt, cfg);
+      if (out.episodeStart) { day.targets[k].count++; console.log(`[fw] episode ${k}`); }
+      if (out.activeSec) day.targets[k].sec += out.activeSec;
+      if (out.alert) notify(k);
+    }
+    setHud(calib ? "基準を取得中…" : (tex && tex.luma < 50) ? "見張り中。暗くて不安定です" : "見張り中");
+    drawOverlay(lm); updateMeters(); updateAlertUI();
+  }
+
+  if (now - lastUi > 250) { lastUi = now; updateLiveValues(); renderDiag(); }
+  if (now - lastStatsRender > 2000) { lastStatsRender = now; saveStats(); renderStats(); }
+}
+
+function scheduleNext() {
+  if (!running) return;
+  const gen = ++loopGen;
+  const tick = () => { if (gen === loopGen) loop(); };
+  const host = pipWindow || window;
+  if (host === window && document.visibilityState === "hidden") setTimeout(tick, 250);
+  else host.requestAnimationFrame(tick);
+}
+function loop() {
+  if (!running) return;
+  const now = performance.now();
+  if (now - lastProcess >= PROCESS_INTERVAL_MS && els.video.readyState >= 2 && els.video.videoWidth > 0) {
+    lastProcess = now;
+    processFrame(now);
+  }
+  scheduleNext();
+}
+
+// ---------- 開始・停止・小窓 ----------
+async function createLandmarker() {
+  const vision = await FilesetResolver.forVisionTasks(MP_WASM);
+  const opts = delegate => ({
+    baseOptions: { modelAssetPath: MODEL_URL, delegate },
+    runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: false,
+  });
+  try { return await FaceLandmarker.createFromOptions(vision, opts("GPU")); }
+  catch (e) { console.warn("[fw] GPU delegate failed, fallback to CPU", e); return await FaceLandmarker.createFromOptions(vision, opts("CPU")); }
+}
+
+const pipSupported = () => "documentPictureInPicture" in window;
+
+async function start() {
+  els.btnStart.disabled = true;
+  ensureAudio();
+  try {
+    if (!landmarker) {
+      setStatus("判定モデルを読み込み中…（初回だけ数秒かかります）");
+      landmarker = await createLandmarker();
+      console.log("[fw] model loaded");
+    }
+    setStatus("カメラを起動中…");
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
+    els.video.srcObject = stream;
+    await els.video.play();
+    console.log("[fw] camera started", els.video.videoWidth, els.video.videoHeight);
+    running = true; lastTick = null; lastProcess = 0; frameCount = 0;
+    resetStates();
+    els.btnPip.disabled = !pipSupported(); els.btnCalib.disabled = false; els.btnStop.disabled = false;
+    setStatus(pipSupported()
+      ? "見張っています。「小窓にする」を押すと、他のアプリの上に残ります"
+      : "見張っています。この Chrome は小窓表示に未対応です（Chrome 116 以降で使えます）");
+    scheduleNext();
+  } catch (e) {
+    console.error("[fw] start failed", e);
+    setStatus("開始できませんでした: " + (e?.message || e));
+    els.btnStart.disabled = false;
+  }
+}
+
+function stop() {
+  running = false; loopGen++;
+  if (pipWindow) { try { pipWindow.close(); } catch {} }
+  if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; }
+  els.video.srcObject = null;
+  calib = null; resetStates();
+  for (const k of Object.keys(TARGETS)) liveEff[k] = null;
+  diag.scores = null; diag.geo = null; diag.tex = null;
+  updateMeters(); updateAlertUI(); updateLiveValues(); renderDiag(); drawOverlay(null);
+  saveStats(); renderStats();
+  setHud("停止中"); setStatus("停止しました");
+  els.btnStart.disabled = false; els.btnPip.disabled = true; els.btnCalib.disabled = true; els.btnStop.disabled = true;
+}
+
+async function togglePip() {
+  if (pipWindow) { pipWindow.close(); return; }
+  try {
+    const pip = await window.documentPictureInPicture.requestWindow({ width: 380, height: 300 });
+    for (const sheet of document.styleSheets) {
+      try {
+        const css = [...sheet.cssRules].map(r => r.cssText).join("\n");
+        const st = pip.document.createElement("style"); st.textContent = css; pip.document.head.appendChild(st);
+      } catch {}
+    }
+    pip.document.title = "Frown Watch";
+    pip.document.body.classList.add("pip");
+    pip.document.body.append(els.stage);
+    els.video.play().catch(() => {});
+    pipWindow = pip;
+    els.btnPip.textContent = "小窓を閉じる";
+    setStatus("小窓で見張っています。このタブを離れても判定は続きます");
+    pip.addEventListener("pagehide", () => {
+      els.stageHost.append(els.stage);
+      pipWindow = null;
+      els.video.play().catch(() => {});
+      els.btnPip.textContent = "小窓にする";
+      if (running) setStatus("小窓を閉じました。このタブが見えている間だけ判定します");
+      scheduleNext();
+    });
+    scheduleNext();
+  } catch (e) {
+    console.error("[fw] pip failed", e);
+    setStatus("小窓を開けませんでした: " + (e?.message || e));
+  }
+}
+
+function startCalib() {
+  if (!running) return;
+  calib = { until: performance.now() + CALIB_MS, sums: {}, geo: { gap: 0, drop: 0 }, tex: { energy: 0, vertical: 0 }, n: 0, texN: 0 };
+  setStatus("3 秒間、無表情で正面を向いてください…");
+}
+
+function flashStage(label) {
+  els.stage.classList.add("alert");
+  els.alertLabel.textContent = label;
+  setTimeout(() => { if (!Object.keys(TARGETS).some(k => states[k].active)) { els.stage.classList.remove("alert"); els.alertLabel.textContent = ""; } }, 1500);
+}
+
+// ---------- イベント ----------
+els.btnStart.addEventListener("click", start);
+els.btnStop.addEventListener("click", stop);
+els.btnPip.addEventListener("click", togglePip);
+els.btnCalib.addEventListener("click", startCalib);
+els.btnTest.addEventListener("click", () => {
+  ensureAudio();
+  flashStage("テスト: 眉間に力が入っています");
+  if (!settings.sound && !settings.notify) setStatus("音も通知もオフです。枠の点滅だけで知らせます");
+  else { states.glabella.lastAlertAt = -Infinity; notify("glabella"); }
+});
+els.optSound.checked = settings.sound;
+els.optSound.addEventListener("change", () => { settings.sound = els.optSound.checked; if (settings.sound) ensureAudio(); saveSettings(); });
+els.optNotify.checked = settings.notify && "Notification" in window && Notification.permission === "granted";
+settings.notify = els.optNotify.checked;
+els.optNotify.addEventListener("change", async () => {
+  if (els.optNotify.checked) {
+    if (!("Notification" in window)) { setStatus("この環境では通知が使えません"); els.optNotify.checked = false; }
+    else if (await Notification.requestPermission() !== "granted") {
+      setStatus("通知が許可されていません。Chrome の通知設定と、macOS の通知設定で Chrome を許可してください");
+      els.optNotify.checked = false;
+    }
+  }
+  settings.notify = els.optNotify.checked; saveSettings();
+});
+els.btnCsv.addEventListener("click", async () => {
+  const keys = Object.keys(TARGETS);
+  const head = ["date", ...keys.flatMap(k => [`${k}_count`, `${k}_sec`]), "face_sec", "noface_sec"];
+  const rows = Object.keys(stats).sort().map(dk => {
+    const s = stats[dk];
+    return [dk, ...keys.flatMap(k => [s.targets[k].count, Math.round(s.targets[k].sec)]), Math.round(s.faceSec), Math.round(s.noFaceSec)].join(",");
+  });
+  const csv = [head.join(","), ...rows].join("\n");
+  try { await navigator.clipboard.writeText(csv); setStatus(`CSV をコピーしました（${rows.length} 日分）`); }
+  catch { setStatus("コピーできませんでした。コンソールに出力します"); console.log(csv); }
+});
+els.btnReset.addEventListener("click", () => {
+  if (!confirm("今日の記録を消しますか？")) return;
+  delete stats[dateKey()]; saveStats(); renderStats(); updateAlertUI();
+});
+els.video.addEventListener("loadedmetadata", () => {
+  if (els.video.videoWidth && els.video.videoHeight) els.stage.style.aspectRatio = `${els.video.videoWidth} / ${els.video.videoHeight}`;
+});
+window.addEventListener("beforeunload", saveStats);
+
+// ---------- 初期化 ----------
+buildTargetTable(); buildMeters(); buildFocusSelect(); renderBaselineInfo(); renderStats(); updateAlertUI(); renderDiag();
+if (!navigator.mediaDevices?.getUserMedia) setStatus("このブラウザではカメラが使えません。http://localhost か https で開いてください");
+else if (!pipSupported()) setStatus("準備できました。小窓表示はこの Chrome では使えません（Chrome 116 以降が必要）");
+else setStatus("準備できました。「カメラを開始」を押してください");
+if (new URLSearchParams(location.search).has("autostart")) start();
