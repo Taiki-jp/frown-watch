@@ -1,13 +1,13 @@
 # Frown Watch
 
+[![Demo: the mini window turns red when the brow stays tense](docs/demo.gif)](docs/demo.mp4)
+
 A web app that watches your facial habits through the front camera while you watch videos. When your brow stays tense, an always-on-top mini window turns red to let you know.
 All detection runs inside the browser, and **your video is never shared**.
 
 **▶ Try it: https://taiki-jp.github.io/frown-watch/?lang=en**
 
 The app is available in English and Japanese.
-
-![Top page](docs/top.png)
 
 ## Features
 
@@ -26,8 +26,6 @@ The app is available in English and Japanese.
    5. Mini window — switch to the always-on-top mini window
 3. Keep the mini window open and watch videos as usual. When your brow stays tense, the mini window turns red
 4. From the second visit on, the regular screen opens. Press "Start watching" → "Open mini window" to get back to the same state
-
-![Setup: checking requirements](docs/app.png)
 
 ## Requirements
 
