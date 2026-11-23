@@ -81,10 +81,11 @@ Open http://localhost:8765/ in Chrome. The camera only works over https or on lo
 | `app.html`, `app.js` | The app itself: all detection and UI |
 | `i18n.js` | English and Japanese dictionaries and language switching |
 | `frame-guard.js` | Stops the page when another site embeds it in an iframe (clickjacking guard) |
-| `vendor/mediapipe/` | MediaPipe Tasks Vision 1.1.0 (Apache-2.0) |
+| `vendor/mediapipe/` | MediaPipe Tasks Vision (Apache-2.0); the version is in `vendor/NOTICE.md` |
 | `vendor/models/face_landmarker.task` | Face landmark and blendshape model (Apache-2.0) |
 | `vendor/NOTICE.md` | Sources and SHA-256 of bundled files |
 | `test/` | Unit tests for detection logic and diagnostic values |
+| `scripts/update-vendor.mjs` | Replaces `vendor/mediapipe/` with a version from npm |
 
 ### Tests
 
@@ -92,6 +93,19 @@ Open http://localhost:8765/ in Chrome. The camera only works over https or on lo
 node test/logic.test.mjs
 node test/diag.test.mjs
 ```
+
+### Updating MediaPipe
+
+A weekly GitHub Actions workflow (`.github/workflows/update-vendor.yml`) opens a PR when npm has a newer `@mediapipe/tasks-vision`, and opens an issue when a newer face model is published. Before merging, open the PR locally and check that detection still works; CI can't use a camera.
+
+To update by hand:
+
+```sh
+node scripts/update-vendor.mjs          # latest
+node scripts/update-vendor.mjs 1.2.3    # a given version
+```
+
+The script checks the tarball against npm's integrity hash before unpacking it, then rewrites `vendor/NOTICE.md`.
 
 ### URL parameters for development
 

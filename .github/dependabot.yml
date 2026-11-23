@@ -1,0 +1,7 @@
+# ワークフローで使っている Actions の更新を追う。MediaPipe は update-vendor.yml で追っている
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
