@@ -1,4 +1,5 @@
 // トップページ。言語の切り替えと、セットアップ済みならボタンの文言を変える
+import "./frame-guard.js";
 import { LANGS, getLang, setLang, makeT, applyStatic } from "./i18n.js";
 const VERSION = "0.3.0";
 function apply(l) {

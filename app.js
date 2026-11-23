@@ -1,3 +1,4 @@
+import "./frame-guard.js";
 import { FaceLandmarker, FilesetResolver } from "./vendor/mediapipe/vision_bundle.mjs";
 import { LANGS, getLang, setLang, makeT, applyStatic } from "./i18n.js";
 
@@ -907,8 +908,7 @@ checkEnvironment().then(r => { if (!r.ok) renderEnv(els.envResult, r); }); // �
 const params = new URLSearchParams(location.search);
 if (params.has("open")) for (const d of document.querySelectorAll("details")) d.open = true;
 if (params.has("env")) runEnvCheck(els.envCheckBtn, els.envResult);
-if (params.has("ob")) showOnboarding(Number(params.get("ob")) || 1);
-else if (params.has("autostart")) { showMain(); start(); }
+if (params.has("ob")) showOnboarding(Number(params.get("ob")) || 1); // ?autostart は廃止。リンクを踏むだけでカメラが点かないよう、開始は必ずボタンから
 else if (settings.onboarded) showMain();
 else showOnboarding(1);
 if (location.hash === "#privacy") { els.privacy.open = true; els.privacy.scrollIntoView(); }

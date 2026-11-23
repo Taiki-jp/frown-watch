@@ -80,6 +80,7 @@ Open http://localhost:8765/ in Chrome. The camera only works over https or on lo
 | `index.html`, `top.js` | Top page and its CSS animation demo |
 | `app.html`, `app.js` | The app itself: all detection and UI |
 | `i18n.js` | English and Japanese dictionaries and language switching |
+| `frame-guard.js` | Stops the page when another site embeds it in an iframe (clickjacking guard) |
 | `vendor/mediapipe/` | MediaPipe Tasks Vision 1.1.0 (Apache-2.0) |
 | `vendor/models/face_landmarker.task` | Face landmark and blendshape model (Apache-2.0) |
 | `vendor/NOTICE.md` | Sources and SHA-256 of bundled files |
@@ -98,7 +99,6 @@ Add these to `app.html`.
 
 | Parameter | Effect |
 |---|---|
-| `?autostart` | Skip setup and start watching |
 | `?ob=3` | Open the 3rd setup step |
 | `?open` | Expand all collapsible sections |
 | `?env` | Run the requirements check |
