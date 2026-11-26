@@ -5,9 +5,9 @@
 A web app that watches your facial habits through the front camera while you watch videos. When your brow stays tense, an always-on-top mini window turns red to let you know.
 All detection runs inside the browser, and **your video is never shared**.
 
-**▶ Try it: https://taiki-jp.github.io/frown-watch/?lang=en**
+**▶ Try it: https://taiki-jp.github.io/frown-watch/en/**
 
-The app is available in English and Japanese.
+The app is available in English and Japanese ([日本語](https://taiki-jp.github.io/frown-watch/)).
 
 ## Features
 
@@ -17,7 +17,7 @@ The app is available in English and Japanese.
 
 ## How to use
 
-1. Open https://taiki-jp.github.io/frown-watch/?lang=en in Chrome and press "Get started"
+1. Open https://taiki-jp.github.io/frown-watch/en/ in Chrome and press "Get started"
 2. The first time, setup walks you through 5 steps
    1. Welcome — check that your environment is supported
    2. Camera — allow the front camera and check how you appear
@@ -77,7 +77,9 @@ Open http://localhost:8765/ in Chrome. The camera only works over https or on lo
 
 | File | Role |
 |---|---|
-| `index.html`, `top.js` | Top page and its CSS animation demo |
+| `index.html`, `top.js` | Top page (Japanese) and its CSS animation demo |
+| `en/index.html`, `sitemap.xml` | English top page and sitemap, written by `scripts/build-pages.mjs`. Don't edit by hand |
+| `docs/og-*.png` | Link preview images (Open Graph) |
 | `app.html`, `app.js` | The app itself: all detection and UI |
 | `i18n.js` | English and Japanese dictionaries and language switching |
 | `frame-guard.js` | Stops the page when another site embeds it in an iframe (clickjacking guard) |
@@ -86,13 +88,17 @@ Open http://localhost:8765/ in Chrome. The camera only works over https or on lo
 | `vendor/NOTICE.md` | Sources and SHA-256 of bundled files |
 | `test/` | Unit tests for detection logic and diagnostic values |
 | `scripts/update-vendor.mjs` | Replaces `vendor/mediapipe/` with a version from npm |
+| `scripts/build-pages.mjs` | Writes the top page per language, with title, description and link-preview tags from `i18n.js` |
 
 ### Tests
 
 ```sh
 node test/logic.test.mjs
 node test/diag.test.mjs
+node test/pages.test.mjs   # fails if en/index.html or sitemap.xml is out of date
 ```
+
+After editing `index.html` or the `meta.*` / top-page strings in `i18n.js`, run `node scripts/build-pages.mjs` and commit the output.
 
 ### Updating MediaPipe
 
@@ -116,7 +122,7 @@ Add these to `app.html`.
 | `?ob=3` | Open the 3rd setup step |
 | `?open` | Expand all collapsible sections |
 | `?env` | Run the requirements check |
-| `?lang=en` | Open in the given language (also works on `index.html`) |
+| `?lang=en` | Open in the given language. On the top page it redirects to `/en/` |
 
 ### Raw values for detection
 

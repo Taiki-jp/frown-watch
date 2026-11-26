@@ -1,12 +1,30 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-page-lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
-<meta name="description" content="動画を見ている間、内カメラで表情を見守り、眉間に力が入ったままになると小窓が赤くなって知らせる Web アプリ。動画は一切外部公開されません。">
-<title>Frown Watch</title>
+<!--META-START: scripts/build-pages.mjs が書き換える-->
+<title>Frown Watch｜眉間のしわの癖にその場で気づく無料 Web アプリ</title>
+<meta name="description" content="動画を見ている間、内カメラで表情を見守り、眉間に力が入ったままになると最前面の小窓が赤くなって知らせる無料の Web アプリ。インストール不要で、映像は PC の外に一切出ません。">
+<link rel="canonical" href="https://taiki-jp.github.io/frown-watch/">
+<link rel="alternate" hreflang="ja" href="https://taiki-jp.github.io/frown-watch/">
+<link rel="alternate" hreflang="en" href="https://taiki-jp.github.io/frown-watch/en/">
+<link rel="alternate" hreflang="x-default" href="https://taiki-jp.github.io/frown-watch/en/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Frown Watch">
+<meta property="og:title" content="眉間のしわの癖に、その場で気づく｜Frown Watch">
+<meta property="og:description" content="動画を見ている間、内カメラで表情を見守り、眉間に力が入ったままになると最前面の小窓が赤くなって知らせる無料の Web アプリ。インストール不要で、映像は PC の外に一切出ません。">
+<meta property="og:url" content="https://taiki-jp.github.io/frown-watch/">
+<meta property="og:image" content="https://taiki-jp.github.io/frown-watch/docs/og-ja.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="眉間に力が入ると赤くなる Frown Watch の小窓">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<!--META-END-->
 <style>
 :root{
   color-scheme:light;
@@ -99,8 +117,8 @@ h2{font-size:22px;margin:0 0 18px}
   .nav .hide-sm{display:none}
 }
 .lang{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-size:12px;background:#fff}
-.lang button{border:0;border-radius:0;padding:4px 10px;background:#fff;color:var(--muted);font-weight:600;font-size:12px;cursor:pointer;font-family:inherit}
-.lang button.on{background:var(--fg);color:#fff}
+.lang a{padding:4px 10px;background:#fff;color:var(--muted);font-weight:600;font-size:12px;text-decoration:none}
+.lang a.on{background:var(--fg);color:#fff}
 </style>
 </head>
 <body>
@@ -108,7 +126,7 @@ h2{font-size:22px;margin:0 0 18px}
   <header class="topbar">
     <a class="brand" href="./"><span class="logo"></span>Frown Watch</a>
     <nav class="nav">
-      <div class="lang" id="lang"><button data-lang="ja">日本語</button><button data-lang="en">EN</button></div>
+      <div class="lang" id="lang"><a href="./" hreflang="ja" data-lang="ja" class="on">日本語</a><a href="en/" hreflang="en" data-lang="en">EN</a></div>
       <a href="#privacy" class="hide-sm" data-i18n="nav.privacy">プライバシー</a>
       <a class="btn primary small cta" href="app.html">はじめる</a>
     </nav>
@@ -117,8 +135,8 @@ h2{font-size:22px;margin:0 0 18px}
   <section class="hero" style="padding-bottom:16px">
     <div>
       <span class="tag" data-i18n="hero.tag">試作版 ・ Chrome で動きます</span>
-      <h1 data-i18n-html="hero.title">安全に、<br>顔のお悩みチェック。</h1>
-      <p class="lead" data-i18n="hero.lead">Frown Watch は、内カメラで表情の癖を見守る Web アプリです。動画を見ている間に眉間へ力が入ったままになると、常に最前面の小窓が赤くなって知らせます。判定はこの PC の中だけで行い、動画は一切外部公開されません。</p>
+      <h1 data-i18n-html="hero.title">眉間のしわの癖に、<br>その場で気づく。</h1>
+      <p class="lead" data-i18n="hero.lead">Frown Watch は、内カメラで眉間のしわや表情の癖を見守る無料の Web アプリです。動画を見ている間に眉間へ力が入ったままになると、常に最前面の小窓が赤くなって知らせます。判定はこの PC の中だけで行い、動画は一切外部公開されません。</p>
       <div class="cta">
         <a class="btn primary cta" href="app.html">はじめる</a>
       </div>

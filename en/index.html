@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-page-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<!--META-START: scripts/build-pages.mjs が書き換える-->
+<title>Frown Watch – Catch yourself frowning at the screen (free, on-device)</title>
+<meta name="description" content="A free web app that watches your brow through the front camera while you watch videos. When the tension lasts, an always-on-top mini window turns red. No install, and your video never leaves your computer.">
+<link rel="canonical" href="https://taiki-jp.github.io/frown-watch/en/">
+<link rel="alternate" hreflang="ja" href="https://taiki-jp.github.io/frown-watch/">
+<link rel="alternate" hreflang="en" href="https://taiki-jp.github.io/frown-watch/en/">
+<link rel="alternate" hreflang="x-default" href="https://taiki-jp.github.io/frown-watch/en/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Frown Watch">
+<meta property="og:title" content="Frown Watch – Catch yourself frowning at the screen">
+<meta property="og:description" content="A free web app that watches your brow through the front camera while you watch videos. When the tension lasts, an always-on-top mini window turns red. No install, and your video never leaves your computer.">
+<meta property="og:url" content="https://taiki-jp.github.io/frown-watch/en/">
+<meta property="og:image" content="https://taiki-jp.github.io/frown-watch/docs/og-en.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Frown Watch mini window turning red when the brow stays tense">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+<!--META-END-->
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f7f4f1; --card:#ffffff; --fg:#28262e; --muted:#7b7784; --line:#ece6e1; --soft:#f3eeea;
+  --accent:#e26b6b; --accent-dark:#c75656; --accent-soft:#fbe9e7;
+  --ok:#2f9e7a; --ok-soft:#e3f4ec; --alert:#e5484d;
+  --radius:16px; --shadow:0 1px 2px rgba(40,20,10,.04),0 8px 24px rgba(40,20,10,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent-dark)}
+.wrap{max-width:960px;margin:0 auto;padding:0 20px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 0}
+.brand{font-weight:700;font-size:18px;display:flex;align-items:center;gap:8px;color:var(--fg);text-decoration:none}
+.logo{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#f0a57a)}
+.nav{display:flex;gap:18px;align-items:center;font-size:14px}
+.nav a{color:var(--muted);text-decoration:none}
+.nav a:hover{color:var(--accent-dark)}
+.btn{display:inline-block;font:inherit;font-weight:700;border-radius:12px;padding:12px 22px;border:1px solid var(--line);background:#fff;color:var(--fg);text-decoration:none;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-dark)}
+.btn.small{padding:8px 14px;font-size:14px}
+
+/* ---- ヒーロー ---- */
+.hero{display:grid;grid-template-columns:1.05fr 1fr;gap:40px;align-items:center;padding:36px 0 48px}
+.hero h1{font-size:34px;line-height:1.35;margin:0 0 14px;letter-spacing:.01em;word-break:keep-all}
+.hero p.lead{font-size:16px;color:#4b4854;margin:0 0 22px}
+.hero .cta{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.hero .note{color:var(--muted);font-size:13px;margin:12px 0 0}
+.tag{display:inline-block;font-size:12px;font-weight:700;color:var(--accent-dark);background:var(--accent-soft);border-radius:999px;padding:3px 10px;margin-bottom:14px}
+
+/* ---- デモ ---- */
+.demo{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+.screen{position:relative;aspect-ratio:16/10;background:#15181f;border-radius:12px;overflow:hidden}
+.video{position:absolute;inset:14px 14px 42px;border-radius:8px;background:#0b0d12;overflow:hidden}
+.video::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#1b2230,#0f1218 60%,#171d2a)}
+.vt{position:absolute;left:10%;top:10%;width:46%;height:8px;border-radius:4px;background:rgba(255,255,255,.18)}
+.vt.short{top:10%;left:10%;transform:translateY(14px);width:28%;background:rgba(255,255,255,.1)}
+.vplay{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.12)}
+.vbar{height:100%;width:12%;background:var(--accent);animation:play 8s linear infinite}
+.pip{position:absolute;right:14px;bottom:14px;width:40%;aspect-ratio:4/3;background:#000;border:3px solid #2a2f3a;border-radius:10px;overflow:hidden;animation:pipBorder 8s linear infinite}
+.pip svg{position:absolute;inset:0;width:100%;height:100%}
+.brow{transform-box:fill-box}
+.brow-l{transform-origin:0% 50%;animation:browL 8s ease-in-out infinite}
+.brow-r{transform-origin:100% 50%;animation:browR 8s ease-in-out infinite}
+.lines{opacity:0;animation:lines 8s ease-in-out infinite}
+.pip-hud{position:absolute;left:0;right:0;bottom:0;padding:5px 7px;display:flex;align-items:center;gap:6px;font-size:9px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.7))}
+.pip-hud .m{flex:1;height:4px;background:rgba(255,255,255,.2);border-radius:2px;position:relative}
+.pip-hud .mf{height:100%;width:8%;background:#3ddc84;border-radius:2px;animation:meter 8s ease-in-out infinite,meterColor 8s linear infinite}
+.pip-hud .th{position:absolute;left:45%;top:-2px;width:1px;height:8px;background:#fff}
+.toast{position:absolute;left:14px;bottom:14px;display:inline-flex;align-items:center;gap:8px;background:#fff;color:var(--fg);font-size:12px;font-weight:700;padding:8px 12px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;animation:toast 8s ease-in-out infinite}
+.toast .dot{width:8px;height:8px;border-radius:50%;background:var(--alert)}
+.caption{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:12px;margin:12px 2px 0}
+@keyframes play{0%{width:12%}100%{width:88%}}
+@keyframes browL{0%,25%{transform:translate(0,0) rotate(0)}38%,62%{transform:translate(3px,4px) rotate(14deg)}75%,100%{transform:translate(0,0) rotate(0)}}
+@keyframes browR{0%,25%{transform:translate(0,0) rotate(0)}38%,62%{transform:translate(-3px,4px) rotate(-14deg)}75%,100%{transform:translate(0,0) rotate(0)}}
+@keyframes lines{0%,28%{opacity:0}40%,60%{opacity:1}72%,100%{opacity:0}}
+@keyframes meter{0%,25%{width:8%}38%,62%{width:72%}75%,100%{width:8%}}
+@keyframes meterColor{0%,49%{background:#3ddc84}50%,62%{background:var(--alert)}64%,100%{background:#3ddc84}}
+@keyframes pipBorder{0%,49%{border-color:#2a2f3a;box-shadow:none}50%,53%{border-color:var(--alert);box-shadow:0 0 0 4px rgba(229,72,77,.45)}56%{border-color:var(--alert);box-shadow:0 0 0 1px rgba(229,72,77,.15)}59%,62%{border-color:var(--alert);box-shadow:0 0 0 4px rgba(229,72,77,.45)}64%,100%{border-color:#2a2f3a;box-shadow:none}}
+@keyframes toast{0%,49%{opacity:0;transform:translateY(8px)}53%,63%{opacity:1;transform:translateY(0)}68%,100%{opacity:0;transform:translateY(8px)}}
+@media (prefers-reduced-motion:reduce){
+  .demo *{animation:none !important}
+  .toast{opacity:1;transform:none}
+  .pip{border-color:var(--alert)}
+  .lines{opacity:1}
+  .brow-l{transform:translate(3px,4px) rotate(14deg)}
+  .brow-r{transform:translate(-3px,4px) rotate(-14deg)}
+  .pip-hud .mf{width:72%;background:var(--alert)}
+  .vbar{width:60%}
+}
+
+/* ---- 本文 ---- */
+section{padding:28px 0}
+.card h3{font-size:16px;margin:0 0 8px}
+h2{font-size:22px;margin:0 0 18px}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}
+.bullets{margin:0;padding-left:20px;color:#4b4854;font-size:14px}
+.privacy{display:grid;grid-template-columns:1fr;gap:24px;align-items:start}
+.site-footer{margin-top:24px;padding:20px 0 32px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.footer-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.footer-brand{font-weight:700;color:var(--fg);display:flex;align-items:center;gap:8px}
+.footer-brand .logo{width:16px;height:16px;border-radius:5px}
+.footer-links{display:flex;gap:16px}
+.footer-links a{color:var(--muted);text-decoration:none}
+.footer-links a:hover{color:var(--accent-dark);text-decoration:underline}
+@media (max-width:820px){
+  .hero{grid-template-columns:1fr;gap:24px;padding:20px 0 32px}
+  .hero h1{font-size:28px}
+  .nav .hide-sm{display:none}
+}
+.lang{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-size:12px;background:#fff}
+.lang a{padding:4px 10px;background:#fff;color:var(--muted);font-weight:600;font-size:12px;text-decoration:none}
+.lang a.on{background:var(--fg);color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <a class="brand" href="./"><span class="logo"></span>Frown Watch</a>
+    <nav class="nav">
+      <div class="lang" id="lang"><a href="../" hreflang="ja" data-lang="ja">日本語</a><a href="./" hreflang="en" data-lang="en" class="on">EN</a></div>
+      <a href="#privacy" class="hide-sm" data-i18n="nav.privacy">Privacy</a>
+      <a class="btn primary small cta" href="../app.html?lang=en">Get started</a>
+    </nav>
+  </header>
+
+  <section class="hero" style="padding-bottom:16px">
+    <div>
+      <span class="tag" data-i18n="hero.tag">Prototype · Works in Chrome</span>
+      <h1 data-i18n-html="hero.title">Catch yourself<br>frowning at the screen.</h1>
+      <p class="lead" data-i18n="hero.lead">Frown Watch is a free web app that watches for frowning and other facial habits through the front camera. When your brow stays tense while you watch videos, an always-on-top mini window turns red to let you know. Everything runs on this computer, and your video is never shared.</p>
+      <div class="cta">
+        <a class="btn primary cta" href="../app.html?lang=en">Get started</a>
+      </div>
+      <p class="note" data-i18n="hero.note">No install needed. Your video is never shared.</p>
+    </div>
+    <div class="demo" data-i18n-aria="demo.aria" aria-label="Demo: the mini window flags a tense brow while you watch a video">
+      <div class="screen">
+        <div class="video"><div class="vt"></div><div class="vt short"></div><div class="vplay"><div class="vbar"></div></div></div>
+        <div class="toast"><span class="dot"></span><em data-i18n="demo.toast">Your brow is tensing</em></div>
+        <div class="pip">
+          <svg viewBox="0 0 120 90" aria-hidden="true">
+            <rect width="120" height="90" fill="#1a1d24"/>
+            <ellipse cx="60" cy="52" rx="30" ry="36" fill="#f0c6a6"/>
+            <path d="M30 44 Q60 4 90 44 Q60 26 30 44Z" fill="#3b2a24"/>
+            <ellipse cx="48" cy="54" rx="4" ry="3" fill="#2b2a33"/>
+            <ellipse cx="72" cy="54" rx="4" ry="3" fill="#2b2a33"/>
+            <path class="brow brow-l" d="M38 44 Q46 40 54 43" stroke="#3b2a24" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <path class="brow brow-r" d="M66 43 Q74 40 82 44" stroke="#3b2a24" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <g class="lines" stroke="#c98f6e" stroke-width="1.5" stroke-linecap="round"><path d="M57 42 v8"/><path d="M63 42 v8"/></g>
+            <path d="M52 70 Q60 74 68 70" stroke="#b86b5a" stroke-width="2" fill="none" stroke-linecap="round"/>
+          </svg>
+          <div class="pip-hud"><span data-i18n="habit.glabella">Brow</span><div class="m"><div class="mf"></div><div class="th"></div></div></div>
+        </div>
+      </div>
+      <div class="caption"><span data-i18n="demo.cap1">The mini window watches your face while you watch videos</span><span data-i18n="demo.cap2">After 2 seconds it turns red to let you know</span></div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <h2 data-i18n="privacy.title">Privacy</h2>
+    <div class="privacy">
+      <div class="card">
+        <h3 data-i18n="privacy.videoTitle">How your video is handled</h3>
+        <ul class="bullets">
+          <li data-i18n="privacy.b1">Front-camera video is processed only on this computer and is never shared</li>
+          <li data-i18n="privacy.b2">Only counts, seconds, watch time and your neutral baseline are saved, and only inside this browser</li>
+          <li data-i18n="privacy.b3">The detection library and model ship with the page. Nothing is loaded from outside servers</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="footer-row">
+      <div class="footer-brand"><span class="logo"></span>Frown Watch <span id="version"></span></div>
+      <nav class="footer-links">
+        <a href="#privacy" data-i18n="nav.privacy">Privacy</a>
+        <a href="../app.html?lang=en#privacy" data-i18n="nav.env">Requirements</a>
+        <a href="https://github.com/Taiki-jp/frown-watch" target="_blank" rel="noopener" data-i18n="nav.source">Source code</a>
+      </nav>
+    </div>
+    <p style="margin:10px 0 0" data-i18n="footer.line">Your video is never shared. Records stay in this browser only.</p>
+  </footer>
+</div>
+<script type="module" src="../top.js"></script>
+</body>
+</html>
