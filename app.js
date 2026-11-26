@@ -831,6 +831,7 @@ function applyLanguage(l) {
   document.documentElement.lang = l;
   applyStatic(document, t);
   for (const b of els.lang.querySelectorAll("button")) b.classList.toggle("on", b.dataset.lang === l);
+  document.querySelector("a.brand").href = l === "ja" ? "./" : `${l}/`; // トップページは言語ごとに URL が分かれている
   els.version.textContent = t("footer.version", { v: APP_VERSION });
   buildTargetTable(); buildMeters(); buildFocusSelect(); renderSettings(); renderStats(); renderDiag(); updateAlertUI();
   setButtons(currentMode); setState(currentState); updatePlaceholder();
